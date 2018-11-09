@@ -481,6 +481,27 @@ namespace Opm {
             }    	  
         }
 
+	void storeMatrixWhenDifficult(const Mat& Jac,BVector& rhs,int max_it) const
+        {
+            int it = linearIterationsLastSolve();
+	    
+            if (it > max_it)  
+            {
+                std::ofstream MatFile ("BlackoilMatrix.mtx");
+                std::ofstream VecFile ("BlackoilRHS.vec");
+                Dune::writeMatrixMarket(Jac,MatFile);
+                Dune::writeMatrixMarket(rhs,VecFile);
+                MatFile.close();
+                VecFile.close();
+                
+                
+                std:: ofstream infoFile;
+                infoFile.open("MatrixInfo.txt",std::ofstream::app);
+                infoFile<<"EpisodeIndex: "<< ebosSimulator_.episodeIndex()<<" Current time: "<<ebosSimulator_.time() <<" Number of iterations: " << it << "\n";
+                infoFile.close();
+            }
+        }
+
         /// Solve the Jacobian system Jx = r where J is the Jacobian and
         /// r is the residual.
         void solveJacobianSystem(BVector& x) const
@@ -522,8 +543,11 @@ namespace Opm {
             else
             {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
-                Operator opA(ebosJac, actual_mat_for_prec, wellModel());
+                
+		Operator opA(ebosJac, actual_mat_for_prec, wellModel());
+		int max_it = istlSolver().max_iterations();
                 istlSolver().solve( opA, x, ebosResid );
+                storeMatrixWhenDifficult(ebosJac, ebosResid,max_it);
             }
         }
 

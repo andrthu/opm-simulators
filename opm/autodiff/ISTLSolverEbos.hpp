@@ -382,6 +382,7 @@ namespace Detail
         ///                                with dune-istl the information about the parallelization.
         ISTLSolverEbos(const boost::any& parallelInformation_arg=boost::any())
             : iterations_( 0 )
+	    , max_iterations_( 0 )
             , parallelInformation_(parallelInformation_arg)
             , isIORank_(isIORank(parallelInformation_arg))
         {
@@ -406,7 +407,7 @@ namespace Detail
 
         /// \copydoc NewtonIterationBlackoilInterface::iterations
         int iterations () const { return iterations_; }
-
+        int max_iterations () const { return max_iterations_; }
         /// \copydoc NewtonIterationBlackoilInterface::parallelInformation
         const boost::any& parallelInformation() const { return parallelInformation_; }
 
@@ -672,7 +673,10 @@ namespace Detail
         {
             // store number of iterations
             iterations_ = result.iterations;
-
+            if (max_iterations_<iterations_)
+	    {
+	        max_iterations_=iterations_;
+	    }
             // Check for failure of linear solver.
             if (!parameters_.ignoreConvergenceFailure_ && !result.converged) {
                 const std::string msg("Convergence failure for linear solver.");
@@ -680,9 +684,11 @@ namespace Detail
             }
         }
     protected:
+        mutable int max_iterations_;
         mutable int iterations_;
         boost::any parallelInformation_;
         bool isIORank_;
+      
 
         NewtonIterationBlackoilInterleavedParameters parameters_;
     }; // end ISTLSolver
