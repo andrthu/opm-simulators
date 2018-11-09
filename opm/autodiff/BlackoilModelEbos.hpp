@@ -543,11 +543,10 @@ namespace Opm {
             else
             {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
-                
-		Operator opA(ebosJac, actual_mat_for_prec, wellModel());
-		int max_it = istlSolver().max_iterations();
+                Operator opA(ebosJac, actual_mat_for_prec, wellModel());
+                int max_it = istlSolver().max_iterations();
                 istlSolver().solve( opA, x, ebosResid );
-                storeMatrixWhenDifficult(ebosJac, ebosResid,max_it);
+		storeMatrixWhenDifficult(ebosJac, ebosResid, max_it);
             }
         }
 
