@@ -4,16 +4,26 @@
 namespace Opm {
     template<typename TypeTag>
     BlackoilWellModel<TypeTag>::
-    BlackoilWellModel(Simulator& ebosSimulator,
-                      const ModelParameters& param,
-                      const bool terminal_output)
+    BlackoilWellModel(Simulator& ebosSimulator)
         : ebosSimulator_(ebosSimulator)
-        , param_(param)
-        , terminal_output_(terminal_output)
         , has_solvent_(GET_PROP_VALUE(TypeTag, EnableSolvent))
         , has_polymer_(GET_PROP_VALUE(TypeTag, EnablePolymer))
     {
-        const auto& eclState = ebosSimulator_.vanguard().eclState();
+        terminal_output_ = false;
+        if (ebosSimulator.gridView().comm().rank() == 0)
+            terminal_output_ = EWOMS_GET_PARAM(TypeTag, bool, EnableTerminalOutput);
+    }
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    init(const Opm::EclipseState& eclState, const Opm::Schedule& schedule)
+    {
+        gravity_ = ebosSimulator_.problem().gravity()[2];
+
+        extractLegacyCellPvtRegionIndex_();
+        extractLegacyDepth_();
+
         phase_usage_ = phaseUsageFromDeck(eclState);
 
         const auto& gridView = ebosSimulator_.gridView();
@@ -28,6 +38,79 @@ namespace Opm {
         extractLegacyCellPvtRegionIndex_();
         extractLegacyDepth_();
         initial_step_ = true;
+
+        const auto& grid = ebosSimulator_.vanguard().grid();
+        const auto& cartDims = Opm::UgGridHelpers::cartDims(grid);
+        setupCartesianToCompressed_(Opm::UgGridHelpers::globalCell(grid),
+                                    cartDims[0]*cartDims[1]*cartDims[2]);
+
+        // add the eWoms auxiliary module for the wells to the list
+        ebosSimulator_.model().addAuxiliaryModule(this);
+    }
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    addNeighbors(std::vector<NeighborSet>& neighbors) const
+    {
+        if (!param_.matrix_add_well_contributions_) {
+            return;
+        }
+
+        // Create cartesian to compressed mapping
+        int last_time_step = schedule().getTimeMap().size() - 1;
+        const auto& schedule_wells = schedule().getWells();
+        const auto& cartesianSize = Opm::UgGridHelpers::cartDims(grid());
+
+        // initialize the additional cell connections introduced by wells.
+        for (const auto well : schedule_wells)
+        {
+            std::vector<int> wellCells;
+            // All possible connections of the well
+            const auto& connectionSet = well->getConnections(last_time_step);
+            wellCells.reserve(connectionSet.size());
+
+            for ( size_t c=0; c < connectionSet.size(); c++ )
+            {
+                const auto& connection = connectionSet.get(c);
+                int i = connection.getI();
+                int j = connection.getJ();
+                int k = connection.getK();
+                int cart_grid_idx = i + cartesianSize[0]*(j + cartesianSize[1]*k);
+                int compressed_idx = cartesian_to_compressed_.at(cart_grid_idx);
+
+                if ( compressed_idx >= 0 ) { // Ignore connections in inactive/remote cells.
+                    wellCells.push_back(compressed_idx);
+                }
+            }
+
+            for (int cellIdx : wellCells) {
+                neighbors[cellIdx].insert(wellCells.begin(),
+                                          wellCells.end());
+            }
+        }
+    }
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    linearize(JacobianMatrix& mat , GlobalEqVector& res)
+    {
+        if (!localWellsActive())
+            return;
+
+        // we don't what to add the schur complement
+        // here since it affects the getConvergence method
+        /*
+        for (const auto& well: well_container_) {
+            if (param_.matrix_add_well_contributions_)
+                well->addWellContributions(mat);
+
+            // applying the well residual to reservoir residuals
+            // r = r - duneC_^T * invDuneD_ * resWell_
+            well->apply(res);
+        }
+        */
     }
 
 
@@ -126,15 +209,17 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    beginTimeStep(const int timeStepIdx, const double simulationTime) {
+    beginTimeStep() {
         well_state_ = previous_well_state_;
 
+        const int reportStepIdx = ebosSimulator_.episodeIndex();
+        const double simulationTime = ebosSimulator_.time();
 
         // test wells
-        wellTesting(timeStepIdx, simulationTime);
+        wellTesting(reportStepIdx, simulationTime);
 
         // create the well container
-        well_container_ = createWellContainer(timeStepIdx);
+        well_container_ = createWellContainer(reportStepIdx);
 
         // do the initialization for all the wells
         // TODO: to see whether we can postpone of the intialization of the well containers to
@@ -158,7 +243,7 @@ namespace Opm {
             well->setVFPProperties(vfp_properties_.get());
         }
 
-        // Close wells and completions due to economical reasons
+        // Close completions due to economical reasons
         for (auto& well : well_container_) {
             well->closeCompletions(wellTestState_);
         }
@@ -170,110 +255,40 @@ namespace Opm {
     void
     BlackoilWellModel<TypeTag>::wellTesting(const int timeStepIdx, const double simulationTime) {
         const auto& wtest_config = schedule().wtestConfig(timeStepIdx);
+        if (wtest_config.size() == 0) { // there is no WTEST request
+            return;
+        }
+
         const auto& wellsForTesting = wellTestState_.updateWell(wtest_config, simulationTime);
+        if (wellsForTesting.size() == 0) { // there is no well available for WTEST at the moment
+            return;
+        }
 
-        // Do the well testing if enabled
-        if (wtest_config.size() > 0 && wellsForTesting.size() > 0) {
-            // solve the well equation isolated from the reservoir.
-            const int numComp = numComponents();
-            std::vector< Scalar > B_avg( numComp, Scalar() );
-            computeAverageFormationFactor(B_avg);
-            std::vector<WellInterfacePtr> well_container;
+        // average B factors are required for the convergence checking of well equations
+        std::vector< Scalar > B_avg(numComponents(), Scalar() );
+        computeAverageFormationFactor(B_avg);
 
-            well_container.reserve(wellsForTesting.size());
-            for (auto& testWell : wellsForTesting) {
-                const std::string msg = std::string("well ") + testWell.first + std::string(" is tested");
-                OpmLog::info(msg);
+        for (const auto& testWell : wellsForTesting) {
+            const std::string& well_name = testWell.first;
+            const std::string msg = std::string("well ") + well_name + std::string(" is tested");
+            OpmLog::info(msg);
 
-                // Finding the location of the well in wells_ecl
-                const int nw_wells_ecl = wells_ecl_.size();
-                int index_well = 0;
-                for (; index_well < nw_wells_ecl; ++index_well) {
-                    if (testWell.first == wells_ecl_[index_well]->name()) {
-                        break;
-                    }
-                }
-                // It should be able to find in wells_ecl.
-                if (index_well == nw_wells_ecl) {
-                    OPM_THROW(std::logic_error, "Could not find well " << testWell.first << " in wells_ecl ");
-                }
-                const Well* well_ecl = wells_ecl_[index_well];
+            // this is the well we will test
+            WellInterfacePtr well = createWellForWellTest(well_name, timeStepIdx);
 
-                // Finding the location of the well in wells struct.
-                const int nw = numWells();
-                int wellidx = -999;
-                for (int w = 0; w < nw; ++w) {
-                    if (testWell.first == std::string(wells()->name[w])) {
-                        wellidx = w;
-                        break;
-                    }
-                }                
-                if (wellidx < 0) {
-                    OPM_THROW(std::logic_error, "Could not find the well  " << testWell.first << " in the well struct ");
-                }
+            // some preparation before the well can be used
+            well->init(&phase_usage_, depth_, gravity_, number_of_cells_);
+            const WellNode& well_node = wellCollection().findWellNode(well_name);
+            const double well_efficiency_factor = well_node.getAccumulativeEfficiencyFactor();
+            well->setWellEfficiencyFactor(well_efficiency_factor);
+            well->setVFPProperties(vfp_properties_.get());
 
-                // Use the pvtRegionIdx from the top cell
-                const int well_cell_top = wells()->well_cells[wells()->well_connpos[wellidx]];
-                const int pvtreg = pvt_region_idx_[well_cell_top];
+            const WellTestConfig::Reason testing_reason = testWell.second;
 
-                if ( !well_ecl->isMultiSegment(timeStepIdx) || !param_.use_multisegment_well_) {
-                    well_container.emplace_back(new StandardWell<TypeTag>(well_ecl, timeStepIdx, wells(),
-                                                                          param_, *rateConverter_, pvtreg, numComponents() ) );
-                } else {
-                    well_container.emplace_back(new MultisegmentWell<TypeTag>(well_ecl, timeStepIdx, wells(),
-                                                                              param_, *rateConverter_, pvtreg, numComponents() ) );
-                }
-            }
-
-            for (auto& well : well_container) {
-                WellTestState wellTestStateForTheWellTest;
-                WellState wellStateCopy = well_state_;
-                well->init(&phase_usage_, depth_, gravity_, number_of_cells_);
-                const std::string& well_name = well->name();
-                const WellNode& well_node = wellCollection().findWellNode(well_name);
-                const double well_efficiency_factor = well_node.getAccumulativeEfficiencyFactor();
-                well->setWellEfficiencyFactor(well_efficiency_factor);
-                well->setVFPProperties(vfp_properties_.get());
-                well->updatePrimaryVariables(wellStateCopy);
-                well->initPrimaryVariablesEvaluation();
-
-                bool testWell = true;
-		// if a well is closed because all completions are closed, we need to check each completion
-		// individually. We first open all completions, then we close one by one by calling updateWellTestState
-		// untill the number of closed completions do not increase anymore. 
-                while (testWell) {
-                    const size_t numberOfClosedCompletions = wellTestStateForTheWellTest.sizeCompletions();
-                    well->solveWellForTesting(ebosSimulator_, wellStateCopy, B_avg, terminal_output_);
-                    well->updateWellTestState(wellStateCopy, simulationTime, wellTestStateForTheWellTest, /*writeMessageToOPMLog=*/ false);
-                    well->closeCompletions(wellTestStateForTheWellTest);
-
-                    // Stop testing if the well is closed or shut due to all completions shut
-                    // Also check if number of completions has increased. If the number of closed completions do not increased
-                    // we stop the testing.  
-                    if (wellTestStateForTheWellTest.sizeWells() > 0 || numberOfClosedCompletions == wellTestStateForTheWellTest.sizeCompletions())
-                        testWell = false;
-                }
-
-                // update wellTestState if the well test succeeds
-                if (!wellTestStateForTheWellTest.hasWell(well->name(), WellTestConfig::Reason::ECONOMIC)) {
-                    wellTestState_.openWell(well->name());
-                    const std::string msg = std::string("well ") + well->name() + std::string(" is re-opened");
-                    OpmLog::info(msg);
-                    // also reopen completions
-                    for (auto& completion : well->wellEcl()->getCompletions(timeStepIdx)) {
-                        if (!wellTestStateForTheWellTest.hasCompletion(well->name(), completion.first))
-                            wellTestState_.dropCompletion(well->name(), completion.first);
-                    }
-                }
-            }
+            well->wellTesting(ebosSimulator_, B_avg, simulationTime, timeStepIdx, terminal_output_,
+                              testing_reason, well_state_, wellTestState_);
         }
     }
-
-    // only use this for restart.
-    template<typename TypeTag>
-    void
-    BlackoilWellModel<TypeTag>::
-    setRestartWellState(const WellState& well_state) { previous_well_state_ = well_state; }
 
     // called at the end of a report step
     template<typename TypeTag>
@@ -300,6 +315,60 @@ namespace Opm {
         }
         updateWellTestState(simulationTime, wellTestState_);
         previous_well_state_ = well_state_;
+    }
+
+
+    template<typename TypeTag>
+    template <class Context>
+    void
+    BlackoilWellModel<TypeTag>::
+    computeTotalRatesForDof(RateVector& rate,
+                            const Context& context,
+                            unsigned spaceIdx,
+                            unsigned timeIdx) const
+    {
+        rate = 0;
+        int elemIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
+        for (const auto& well : well_container_)
+            well->addCellRates(rate, elemIdx);
+    }
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    initFromRestartFile(const RestartValue& restartValues)
+    {
+        // gives a dummy dynamic_list_econ_limited
+        DynamicListEconLimited dummyListEconLimited;
+        const auto& defunctWellNames = ebosSimulator_.vanguard().defunctWellNames();
+        WellsManager wellsmanager(eclState(),
+                                  schedule(),
+                                  // The restart step value is used to identify wells present at the given
+                                  // time step. Wells that are added at the same time step as RESTART is initiated
+                                  // will not be present in a restart file. Use the previous time step to retrieve
+                                  // wells that have information written to the restart file.
+                                  std::max(eclState().getInitConfig().getRestartStep() - 1, 0),
+                                  Opm::UgGridHelpers::numCells(grid()),
+                                  Opm::UgGridHelpers::globalCell(grid()),
+                                  Opm::UgGridHelpers::cartDims(grid()),
+                                  Opm::UgGridHelpers::dimensions(grid()),
+                                  Opm::UgGridHelpers::cell2Faces(grid()),
+                                  Opm::UgGridHelpers::beginFaceCentroids(grid()),
+                                  dummyListEconLimited,
+                                  grid().comm().size() > 1,
+                                  defunctWellNames);
+
+        const Wells* wells = wellsmanager.c_wells();
+
+        const int nw = wells->number_of_wells;
+        if (nw > 0) {
+            auto phaseUsage = phaseUsageFromDeck(eclState());
+            size_t numCells = Opm::UgGridHelpers::numCells(grid());
+            well_state_.resize(wells, numCells, phaseUsage); //Resize for restart step
+            wellsToState(restartValues.wells, phaseUsage, well_state_);
+            previous_well_state_ = well_state_;
+        }
+        initial_step_ = false;
     }
 
     template<typename TypeTag>
@@ -374,6 +443,58 @@ namespace Opm {
 
 
     template<typename TypeTag>
+    typename BlackoilWellModel<TypeTag>::WellInterfacePtr
+    BlackoilWellModel<TypeTag>::
+    createWellForWellTest(const std::string& well_name,
+                          const int report_step) const
+    {
+        // Finding the location of the well in wells_ecl
+        const int nw_wells_ecl = wells_ecl_.size();
+        int index_well_ecl = 0;
+        for (; index_well_ecl < nw_wells_ecl; ++index_well_ecl) {
+            if (well_name == wells_ecl_[index_well_ecl]->name()) {
+                break;
+            }
+        }
+        // It should be able to find in wells_ecl.
+        if (index_well_ecl == nw_wells_ecl) {
+            OPM_THROW(std::logic_error, "Could not find well " << well_name << " in wells_ecl ");
+        }
+
+        const Well* well_ecl = wells_ecl_[index_well_ecl];
+
+        // Finding the location of the well in wells struct.
+        const int nw = numWells();
+        int well_index_wells = -999;
+        for (int w = 0; w < nw; ++w) {
+            if (well_name == std::string(wells()->name[w])) {
+                well_index_wells = w;
+                break;
+            }
+        }
+
+        if (well_index_wells < 0) {
+            OPM_THROW(std::logic_error, "Could not find the well  " << well_name << " in the well struct ");
+        }
+
+        // Use the pvtRegionIdx from the top cell
+        const int well_cell_top = wells()->well_cells[wells()->well_connpos[well_index_wells]];
+        const int pvtreg = pvt_region_idx_[well_cell_top];
+
+        if ( !well_ecl->isMultiSegment(report_step) || !param_.use_multisegment_well_) {
+             return WellInterfacePtr(new StandardWell<TypeTag>(well_ecl, report_step, wells(),
+                                                 param_, *rateConverter_, pvtreg, numComponents() ) );
+        } else {
+             return WellInterfacePtr(new MultisegmentWell<TypeTag>(well_ecl, report_step, wells(),
+                                                 param_, *rateConverter_, pvtreg, numComponents() ) );
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
     assemble(const int iterationIdx,
@@ -413,7 +534,7 @@ namespace Opm {
             // basically, this is a more updated state from the solveWellEq based on fixed
             // reservoir state, will tihs be a better place to inialize the explict information?
         }
-        assembleWellEq(dt, false);
+        assembleWellEq(dt);
 
         last_report_.converged = true;
     }
@@ -425,16 +546,13 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    assembleWellEq(const double dt,
-                   bool only_wells)
+    assembleWellEq(const double dt)
     {
         for (auto& well : well_container_) {
-            well->assembleWellEq(ebosSimulator_, dt, well_state_, only_wells);
+            well->assembleWellEq(ebosSimulator_, dt, well_state_);
         }
     }
 
-    // applying the well residual to reservoir residuals
-    // r = r - duneC_^T * invDuneD_ * resWell_
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
@@ -448,9 +566,6 @@ namespace Opm {
             well->apply(r);
         }
     }
-
-
-
 
 
     // Ax = A x - C D^-1 B x
@@ -596,9 +711,8 @@ namespace Opm {
         int it  = 0;
         bool converged;
         do {
-            assembleWellEq(dt, true);
+            assembleWellEq(dt);
 
-            //std::cout << "well convergence only wells " << std::endl;
             converged = getWellConvergence(B_avg);
 
             // checking whether the group targets are converged
@@ -767,7 +881,7 @@ namespace Opm {
     updateWellTestState(const double& simulationTime, WellTestState& wellTestState) const
     {
         for (const auto& well : well_container_) {
-            well->updateWellTestState(well_state_, simulationTime, wellTestState, /*writeMessageToOPMLog=*/ true);
+            well->updateWellTestState(well_state_, simulationTime, /*writeMessageToOPMLog=*/ true, wellTestState);
         }
     }
 
@@ -1084,16 +1198,17 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    setupCompressedToCartesian(const int* global_cell, int number_of_cells, std::map<int,int>& cartesian_to_compressed ) const
+    setupCartesianToCompressed_(const int* global_cell, int number_of_cartesian_cells)
     {
+        cartesian_to_compressed_.resize(number_of_cartesian_cells, -1);
         if (global_cell) {
-            for (int i = 0; i < number_of_cells; ++i) {
-                cartesian_to_compressed.insert(std::make_pair(global_cell[i], i));
+            for (unsigned i = 0; i < number_of_cells_; ++i) {
+                cartesian_to_compressed_[global_cell[i]] = i;
             }
         }
         else {
-            for (int i = 0; i < number_of_cells; ++i) {
-                cartesian_to_compressed.insert(std::make_pair(i, i));
+            for (unsigned i = 0; i < number_of_cells_; ++i) {
+                cartesian_to_compressed_[i] = i;
             }
         }
 
@@ -1104,16 +1219,8 @@ namespace Opm {
     BlackoilWellModel<TypeTag>::
     computeRepRadiusPerfLength(const Grid& grid)
     {
-        // TODO, the function does not work for parallel running
-        // to be fixed later.
-        const int* global_cell = Opm::UgGridHelpers::globalCell(grid);
-
-        std::map<int,int> cartesian_to_compressed;
-        setupCompressedToCartesian(global_cell, number_of_cells_,
-                                    cartesian_to_compressed);
-
         for (const auto& well : well_container_) {
-            well->computeRepRadiusPerfLength(grid, cartesian_to_compressed);
+            well->computeRepRadiusPerfLength(grid, cartesian_to_compressed_);
         }
     }
 

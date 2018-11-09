@@ -58,6 +58,8 @@ namespace Opm
     {
         Base::init(phase_usage_arg, depth_arg, gravity_arg, num_cells);
 
+        connectionRates_.resize(number_of_perforations_);
+
         perf_depth_.resize(number_of_perforations_, 0.);
         for (int perf = 0; perf < number_of_perforations_; ++perf) {
             const int cell_idx = well_cells_[perf];
@@ -241,6 +243,7 @@ namespace Opm
     StandardWell<TypeTag>::
     wellSurfaceVolumeFraction(const int compIdx) const
     {
+
         EvalWell sum_volume_fraction_scaled = 0.;
         for (int idx = 0; idx < num_components_; ++idx) {
             sum_volume_fraction_scaled += wellVolumeFractionScaled(idx);
@@ -432,23 +435,17 @@ namespace Opm
     template<typename TypeTag>
     void
     StandardWell<TypeTag>::
-    assembleWellEq(Simulator& ebosSimulator,
+    assembleWellEq(const Simulator& ebosSimulator,
                    const double dt,
-                   WellState& well_state,
-                   bool only_wells)
+                   WellState& well_state)
     {
         const int np = number_of_phases_;
 
         // clear all entries
-        if (!only_wells) {
-            duneB_ = 0.0;
-            duneC_ = 0.0;
-        }
+        duneB_ = 0.0;
+        duneC_ = 0.0;
         invDuneD_ = 0.0;
         resWell_ = 0.0;
-
-        auto& ebosJac = ebosSimulator.model().linearizer().matrix();
-        auto& ebosResid = ebosSimulator.model().linearizer().residual();
 
         // TODO: it probably can be static member for StandardWell
         const double volume = 0.002831684659200; // 0.1 cu ft;
@@ -460,6 +457,10 @@ namespace Opm
         // the solution gas rate and solution oil rate needs to be reset to be zero for well_state.
         well_state.wellVaporizedOilRates()[index_of_well_] = 0.;
         well_state.wellDissolvedGasRates()[index_of_well_] = 0.;
+
+        for (int p = 0; p < np; ++p) {
+            well_state.productivityIndex()[np*index_of_well_ + p] = 0.;
+        }
 
         for (int perf = 0; perf < number_of_perforations_; ++perf) {
 
@@ -479,34 +480,28 @@ namespace Opm
                 well_state.wellVaporizedOilRates()[index_of_well_] += perf_vap_oil_rate;
             }
 
+            if (has_energy) {
+                connectionRates_[perf][contiEnergyEqIdx] = 0.0;
+            }
+
             for (int componentIdx = 0; componentIdx < num_components_; ++componentIdx) {
                 // the cq_s entering mass balance equations need to consider the efficiency factors.
                 const EvalWell cq_s_effective = cq_s[componentIdx] * well_efficiency_factor_;
 
-                if (!only_wells) {
-                    // subtract sum of component fluxes in the reservoir equation.
-                    // need to consider the efficiency factor
-                    ebosResid[cell_idx][componentIdx] -= cq_s_effective.value();
-                }
+                connectionRates_[perf][componentIdx] = Base::restrictEval(cq_s_effective);
 
                 // subtract sum of phase fluxes in the well equations.
                 resWell_[0][componentIdx] -= cq_s_effective.value();
 
                 // assemble the jacobians
                 for (int pvIdx = 0; pvIdx < numWellEq; ++pvIdx) {
-                    if (!only_wells) {
-                        // also need to consider the efficiency factor when manipulating the jacobians.
-                        duneC_[0][cell_idx][pvIdx][componentIdx] -= cq_s_effective.derivative(pvIdx+numEq); // intput in transformed matrix
-                    }
+                    // also need to consider the efficiency factor when manipulating the jacobians.
+                    duneC_[0][cell_idx][pvIdx][componentIdx] -= cq_s_effective.derivative(pvIdx+numEq); // intput in transformed matrix
                     invDuneD_[0][0][componentIdx][pvIdx] -= cq_s_effective.derivative(pvIdx+numEq);
                 }
 
                 for (int pvIdx = 0; pvIdx < numEq; ++pvIdx) {
-                    if (!only_wells) {
-                        // also need to consider the efficiency factor when manipulating the jacobians.
-                        ebosJac[cell_idx][cell_idx][componentIdx][pvIdx] -= cq_s_effective.derivative(pvIdx);
-                        duneB_[0][cell_idx][componentIdx][pvIdx] -= cq_s_effective.derivative(pvIdx);
-                    }
+                    duneB_[0][cell_idx][componentIdx][pvIdx] -= cq_s_effective.derivative(pvIdx);
                 }
 
                 // Store the perforation phase flux for later usage.
@@ -570,15 +565,7 @@ namespace Opm
                     }
                     // compute the thermal flux
                     cq_r_thermal *= extendEval(fs.enthalpy(phaseIdx)) * extendEval(fs.density(phaseIdx));
-		    // scale the flux by the scaling factor for the energy equation
-                    cq_r_thermal *= GET_PROP_VALUE(TypeTag, BlackOilEnergyScalingFactor);
-
-                    if (!only_wells) {
-                        for (int pvIdx = 0; pvIdx < numEq; ++pvIdx) {
-                            ebosJac[cell_idx][cell_idx][contiEnergyEqIdx][pvIdx] -= cq_r_thermal.derivative(pvIdx);
-                        }
-                        ebosResid[cell_idx][contiEnergyEqIdx] -= cq_r_thermal.value();
-                    }
+                    connectionRates_[perf][contiEnergyEqIdx] += Base::restrictEval(cq_r_thermal);
                 }
             }
 
@@ -591,17 +578,23 @@ namespace Opm
                 } else {
                     cq_s_poly *= extendEval(intQuants.polymerConcentration() * intQuants.polymerViscosityCorrection());
                 }
-                if (!only_wells) {
-                    for (int pvIdx = 0; pvIdx < numEq; ++pvIdx) {
-                        ebosJac[cell_idx][cell_idx][contiPolymerEqIdx][pvIdx] -= cq_s_poly.derivative(pvIdx);
-                    }
-                    ebosResid[cell_idx][contiPolymerEqIdx] -= cq_s_poly.value();
-                }
+                connectionRates_[perf][contiPolymerEqIdx] = Base::restrictEval(cq_s_poly);
             }
 
             // Store the perforation pressure for later usage.
             well_state.perfPress()[first_perf_ + perf] = well_state.bhp()[index_of_well_] + perf_pressure_diffs_[perf];
+
+            // Compute Productivity index
+            for (int p = 0; p < np; ++p) {
+                const unsigned int compIdx = flowPhaseToEbosCompIdx(p);
+                const double drawdown = well_state.perfPress()[first_perf_ + perf] - intQuants.fluidState().pressure(FluidSystem::oilPhaseIdx).value();
+                double productivity_index = cq_s[compIdx].value() / drawdown;
+                scaleProductivityIndex(perf, productivity_index);
+                well_state.productivityIndex()[np*index_of_well_ + p] += productivity_index;
+            }
+
         }
+
 
         // add vol * dF/dt + Q to the well equations;
         for (int componentIdx = 0; componentIdx < numWellConservationEq; ++componentIdx) {
@@ -616,9 +609,16 @@ namespace Opm
         assembleControlEq();
 
         // do the local inversion of D.
-        // we do this manually with invertMatrix to always get our
-        // specializations in for 3x3 and 4x4 matrices.
-        Dune::ISTLUtility::invertMatrix(invDuneD_[0][0]);
+        try
+        {
+            Dune::ISTLUtility::invertMatrix(invDuneD_[0][0]);
+        }
+        catch( ... )
+        {
+            OPM_THROW(Opm::NumericalIssue,"Error when inverting local well equations for well " + name());
+        }
+
+
     }
 
 

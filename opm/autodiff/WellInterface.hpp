@@ -82,6 +82,7 @@ namespace Opm
         typedef typename GET_PROP_TYPE(TypeTag, Indices) Indices;
         typedef typename GET_PROP_TYPE(TypeTag, IntensiveQuantities) IntensiveQuantities;
         typedef typename GET_PROP_TYPE(TypeTag, MaterialLaw) MaterialLaw;
+        typedef typename GET_PROP_TYPE(TypeTag, RateVector) RateVector;
 
         static const int numEq = Indices::numEq;
         typedef double Scalar;
@@ -121,7 +122,7 @@ namespace Opm
         const int indexOfWell() const;
 
         /// Well cells.
-        const std::vector<int>& cells() {return well_cells_; }
+        const std::vector<int>& cells() const {return well_cells_; }
 
         /// Well type, INJECTOR or PRODUCER.
         WellType wellType() const;
@@ -142,19 +143,19 @@ namespace Opm
 
         virtual void solveEqAndUpdateWellState(WellState& well_state) = 0;
 
-        virtual void assembleWellEq(Simulator& ebosSimulator,
+        virtual void assembleWellEq(const Simulator& ebosSimulator,
                                     const double dt,
-                                    WellState& well_state,
-                                    bool only_wells) = 0;
+                                    WellState& well_state) = 0;
 
         void updateWellTestState(const WellState& well_state,
                                  const double& simulationTime,
-                                 WellTestState& wellTestState,
-                                 const bool& writeMessageToOPMLog) const;
+                                 const bool& writeMessageToOPMLog,
+                                 WellTestState& wellTestState
+                                 ) const;
 
         void setWellEfficiencyFactor(const double efficiency_factor);
 
-        void computeRepRadiusPerfLength(const Grid& grid, const std::map<int, int>& cartesian_to_compressed);
+        void computeRepRadiusPerfLength(const Grid& grid, const std::vector<int>& cartesian_to_compressed);
 
         /// using the solution x to recover the solution xw for wells and applying
         /// xw to update Well State
@@ -195,12 +196,30 @@ namespace Opm
         virtual void addWellContributions(Mat&) const
         {}
 
-        void solveWellForTesting(Simulator& ebosSimulator, WellState& well_state, const std::vector<double>& B_avg, bool terminal_output);
+        virtual void addCellRates(RateVector& rates, int cellIdx) const
+        {}
+
+        template <class EvalWell>
+        Eval restrictEval(const EvalWell& in) const
+        {
+            Eval out = 0.0;
+            out.setValue(in.value());
+            for(int eqIdx = 0; eqIdx < numEq;++eqIdx) {
+                out.setDerivative(eqIdx, in.derivative(eqIdx));
+            }
+            return out;
+        }
 
         void closeCompletions(WellTestState& wellTestState);
 
         const Well* wellEcl() const;
 
+        // TODO: theoretically, it should be a const function
+        // Simulator is not const is because that assembleWellEq is non-const Simulator
+        void wellTesting(Simulator& simulator, const std::vector<double>& B_avg,
+                         const double simulation_time, const int report_step,  const bool terminal_output,
+                         const WellTestConfig::Reason testing_reason, const WellState& well_state,
+                         WellTestState& welltest_state);
 
     protected:
 
@@ -317,6 +336,18 @@ namespace Opm
 
         double scalingFactor(const int comp_idx) const;
 
+        void wellTestingEconomic(Simulator& simulator, const std::vector<double>& B_avg,
+                                 const double simulation_time, const int report_step, const bool terminal_output,
+                                 const WellState& well_state, WellTestState& welltest_state);
+
+        void updateWellTestStateEconomic(const WellState& well_state,
+                                         const double simulation_time,
+                                         const bool write_message_to_opmlog,
+                                         WellTestState& well_test_state) const;
+
+        void solveWellForTesting(Simulator& ebosSimulator, WellState& well_state, const std::vector<double>& B_avg, bool terminal_output);
+
+        void scaleProductivityIndex(const int perfIdx, double& productivity_index) const;
 
     };
 

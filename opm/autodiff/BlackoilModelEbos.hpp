@@ -72,11 +72,12 @@ BEGIN_PROPERTIES
 
 NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowIstlSolver, FlowModelParameters, FlowTimeSteppingParameters));
 SET_STRING_PROP(EclFlowProblem, OutputDir, "");
-SET_BOOL_PROP(EclFlowProblem, DisableWells, true);
 SET_BOOL_PROP(EclFlowProblem, EnableDebuggingChecks, false);
 // default in flow is to formulate the equations in surface volumes
 SET_BOOL_PROP(EclFlowProblem, BlackoilConserveSurfaceVolume, true);
 SET_BOOL_PROP(EclFlowProblem, UseVolumetricResidual, false);
+
+SET_TYPE_PROP(EclFlowProblem, EclAquiferModel, Opm::BlackoilAquiferModel<TypeTag>);
 
 // disable all extensions supported by black oil model. this should not really be
 // necessary but it makes things a bit more explicit
@@ -84,6 +85,8 @@ SET_BOOL_PROP(EclFlowProblem, EnablePolymer, false);
 SET_BOOL_PROP(EclFlowProblem, EnableSolvent, false);
 SET_BOOL_PROP(EclFlowProblem, EnableTemperature, true);
 SET_BOOL_PROP(EclFlowProblem, EnableEnergy, false);
+
+SET_TYPE_PROP(EclFlowProblem, EclWellModel, Opm::BlackoilWellModel<TypeTag>);
 
 END_PROPERTIES
 
@@ -145,7 +148,6 @@ namespace Opm {
         BlackoilModelEbos(Simulator& ebosSimulator,
                           const ModelParameters& param,
                           BlackoilWellModel<TypeTag>& well_model,
-                          BlackoilAquiferModel<TypeTag>& aquifer_model,
                           const NewtonIterationBlackoilInterface& linsolver,
                           const bool terminal_output)
         : ebosSimulator_(ebosSimulator)
@@ -159,13 +161,14 @@ namespace Opm {
         , has_energy_(GET_PROP_VALUE(TypeTag, EnableEnergy))
         , param_( param )
         , well_model_ (well_model)
-        , aquifer_model_(aquifer_model)
         , terminal_output_ (terminal_output)
         , current_relaxation_(1.0)
         , dx_old_(UgGridHelpers::numCells(grid_))
         {
             // compute global sum of number of cells
             global_nc_ = detail::countGlobalCells(grid_);
+            //find rows of matrix corresponding to overlap
+            detail::findOverlapRowsAndColumns(grid_,overlapRowAndColumns_);
             if (!istlSolver_)
             {
                 OPM_THROW(std::logic_error,"solver down cast to ISTLSolver failed");
@@ -206,8 +209,6 @@ namespace Opm {
             unsigned numDof = ebosSimulator_.model().numGridDof();
             wasSwitched_.resize(numDof);
             std::fill(wasSwitched_.begin(), wasSwitched_.end(), false);
-
-            wellModel().beginTimeStep(timer.reportStepNum(), timer.simulationTimeElapsed());
 
             if (param_.update_equations_scaling_) {
                 std::cout << "equation scaling not suported yet" << std::endl;
@@ -300,7 +301,7 @@ namespace Opm {
                 // handling well state update before oscillation treatment is a decision based
                 // on observation to avoid some big performance degeneration under some circumstances.
                 // there is no theorectical explanation which way is better for sure.
-                wellModel().recoverWellSolutionAndUpdateWellState(x);
+                wellModel().postSolve(x);
 
                 if (param_.use_update_stabilization_) {
                     // Stabilize the nonlinear update.
@@ -341,10 +342,7 @@ namespace Opm {
         /// \param[in] timer                  simulation timer
         void afterStep(const SimulatorTimerInterface& OPM_UNUSED timer)
         {
-            wellModel().timeStepSucceeded(timer.simulationTimeElapsed());
-            aquiferModel().timeStepSucceeded(timer);
             ebosSimulator_.problem().endTimeStep();
-
         }
 
         /// Assemble the residual and Jacobian of the nonlinear system.
@@ -360,39 +358,12 @@ namespace Opm {
             ebosSimulator_.model().linearizer().linearize();
             ebosSimulator_.problem().endIteration();
 
-            // -------- Aquifer models ----------
-            try
-            {
-                // Modify the Jacobian and residuals according to the aquifer models
-                aquiferModel().assemble(timer, iterationIdx);
-            }
-            catch( ... )
-            {
-                OPM_THROW(Opm::NumericalIssue,"Error when assembling aquifer models");
-            }
-
-            // -------- Current time step length ----------
-            const double dt = timer.currentStepLength();
-
-            // -------- Well equations ----------
-
-            try
-            {
-                // assembles the well equations and applies the wells to
-                // the reservoir equations as a source term.
-                wellModel().assemble(iterationIdx, dt);
-            }
-            catch ( const Dune::FMatrixError& )
-            {
-                OPM_THROW(Opm::NumericalIssue,"Error encounted when solving well equations");
-            }
-
             auto& ebosJac = ebosSimulator_.model().linearizer().matrix();
             if (param_.matrix_add_well_contributions_) {
                 wellModel().addWellContributions(ebosJac);
             }
             if ( param_.preconditioner_add_well_contributions_ &&
-                 ! param_.matrix_add_well_contributions_ ) {
+                                  ! param_.matrix_add_well_contributions_ ) {
                 matrix_for_preconditioner_ .reset(new Mat(ebosJac));
                 wellModel().addWellContributions(*matrix_for_preconditioner_);
             }
@@ -484,13 +455,36 @@ namespace Opm {
             return istlSolver().iterations();
         }
 
+        /// Zero out off-diagonal blocks on rows corresponding to overlap cells
+        /// Diagonal blocks on ovelap rows are set to diag(1e100).
+        void makeOverlapRowsInvalid(Mat& ebosJacIgnoreOverlap) const
+        {	  	  
+            //value to set on diagonal
+            MatrixBlockType diag_block(0.0);
+            for (int eq = 0; eq < numEq; ++eq)	    
+                diag_block[eq][eq] = 1.0e100;
+	  	  
+            //loop over precalculated overlap rows and columns
+            for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
+            {
+                int lcell = row->first; 
+                //diagonal block set to large value diagonal
+                ebosJacIgnoreOverlap[lcell][lcell] = diag_block;
+
+                //loop over off diagonal blocks in overlap row	      
+                for (auto col = row->second.begin(); col != row->second.end(); ++col)
+                {
+                    int ncell = *col;
+                    //zero out block
+                    ebosJacIgnoreOverlap[lcell][ncell] = 0.0;
+                }
+            }    	  
+        }
+
         /// Solve the Jacobian system Jx = r where J is the Jacobian and
         /// r is the residual.
         void solveJacobianSystem(BVector& x) const
         {
-            const auto& ebosJac = ebosSimulator_.model().linearizer().matrix();
-            auto& ebosResid = ebosSimulator_.model().linearizer().residual();
-
             // J = [A, B; C, D], where A is the reservoir equations, B and C the interaction of well
             // with the reservoir and D is the wells itself.
             // The full system is reduced to a number of cells X number of cells system via Schur complement
@@ -500,7 +494,9 @@ namespace Opm {
             // r = [r, r_well], where r is the residual and r_well the well residual.
             // r -= B^T * D^-1 r_well
 
-            // apply well residual to the residual.
+            auto& ebosJac = ebosSimulator_.model().linearizer().matrix();
+            auto& ebosResid = ebosSimulator_.model().linearizer().residual();
+
             wellModel().apply(ebosResid);
 
             // set initial guess
@@ -509,9 +505,16 @@ namespace Opm {
             const Mat& actual_mat_for_prec = matrix_for_preconditioner_ ? *matrix_for_preconditioner_.get() : ebosJac;
             // Solve system.
             if( isParallel() )
-            {
+            {	      
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, true > Operator;
-                Operator opA(ebosJac, actual_mat_for_prec, wellModel(),
+
+                auto ebosJacIgnoreOverlap = Mat(ebosJac);
+                //remove ghost rows in local matrix
+                makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
+
+                //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
+                //to be certain that correct matrix is used for preconditioning.
+                Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel(),
                              istlSolver().parallelInformation() );
                 assert( opA.comm() );
                 istlSolver().solve( opA, x, ebosResid, *(opA.comm()) );
@@ -959,9 +962,6 @@ namespace Opm {
         // Well Model
         BlackoilWellModel<TypeTag>& well_model_;
 
-        // Aquifer Model
-        BlackoilAquiferModel<TypeTag>& aquifer_model_;
-
         /// \brief Whether we print something to std::cout
         bool terminal_output_;
         /// \brief The number of cells of the global grid.
@@ -971,8 +971,8 @@ namespace Opm {
         double current_relaxation_;
         BVector dx_old_;
 
-        std::unique_ptr<Mat> matrix_for_preconditioner_;
-
+        std::unique_ptr<Mat> matrix_for_preconditioner_;        
+        std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
     public:
         /// return the StandardWells object
         BlackoilWellModel<TypeTag>&
@@ -981,12 +981,9 @@ namespace Opm {
         const BlackoilWellModel<TypeTag>&
         wellModel() const { return well_model_; }
 
-        BlackoilAquiferModel<TypeTag>&
-        aquiferModel() { return aquifer_model_; }
-
-        void beginReportStep()
+        void beginReportStep(bool isRestart)
         {
-            ebosSimulator_.problem().beginEpisode();
+            ebosSimulator_.problem().beginEpisode(isRestart);
         }
 
         void endReportStep()
