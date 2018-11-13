@@ -544,9 +544,11 @@ namespace Opm {
             {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
                 Operator opA(ebosJac, actual_mat_for_prec, wellModel());
+
                 int max_it = istlSolver().max_iterations();
+                auto& rhs = ebosSimulator_.model().linearizer().residual();
                 istlSolver().solve( opA, x, ebosResid );
-		storeMatrixWhenDifficult(ebosJac, ebosResid, max_it);
+                storeMatrixWhenDifficult(ebosJac, rhs, max_it);
             }
         }
 
