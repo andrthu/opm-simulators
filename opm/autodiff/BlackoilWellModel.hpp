@@ -40,18 +40,16 @@
 #include <opm/core/wells/DynamicListEconLimited.hpp>
 #include <opm/core/wells/WellCollection.hpp>
 #include <opm/core/simulator/SimulatorReport.hpp>
-#include <opm/autodiff/VFPProperties.hpp>
-#include <opm/autodiff/WellHelpers.hpp>
-#include <opm/autodiff/WellDensitySegmented.hpp>
-#include <opm/autodiff/BlackoilPropsAdFromDeck.hpp>
+#include <opm/autodiff/VFPInjProperties.hpp>
+#include <opm/autodiff/VFPProdProperties.hpp>
 #include <opm/autodiff/BlackoilDetails.hpp>
-#include <opm/autodiff/BlackoilModelParameters.hpp>
 #include <opm/autodiff/WellStateFullyImplicitBlackoil.hpp>
 #include <opm/autodiff/RateConverter.hpp>
 #include <opm/autodiff/WellInterface.hpp>
 #include <opm/autodiff/StandardWell.hpp>
 #include <opm/autodiff/MultisegmentWell.hpp>
 #include <opm/autodiff/Compat.hpp>
+#include <opm/simulators/timestepping/gatherConvergenceReport.hpp>
 #include<opm/autodiff/SimFIBODetails.hpp>
 #include<dune/common/fmatrix.hh>
 #include<dune/istl/bcrsmatrix.hh>
@@ -86,7 +84,7 @@ namespace Opm {
             typedef typename GET_PROP_TYPE(TypeTag, Scalar)              Scalar;
             typedef typename GET_PROP_TYPE(TypeTag, RateVector)          RateVector;
             typedef typename GET_PROP_TYPE(TypeTag, GlobalEqVector)      GlobalEqVector;
-            typedef typename GET_PROP_TYPE(TypeTag, JacobianMatrix)      JacobianMatrix;
+            typedef typename GET_PROP_TYPE(TypeTag, SparseMatrixAdapter) SparseMatrixAdapter;
 
             typedef typename Ewoms::BaseAuxiliaryModule<TypeTag>::NeighborSet NeighborSet;
 
@@ -105,7 +103,7 @@ namespace Opm {
 #else
             typedef Dune::FieldMatrix<Scalar, numEq, numEq > MatrixBlockType;
 #endif
-            typedef Dune::BCRSMatrix <MatrixBlockType> Mat;
+            typedef typename SparseMatrixAdapter::IstlMatrix Mat;
 
             typedef Ewoms::BlackOilPolymerModule<TypeTag> PolymerModule;
 
@@ -129,7 +127,7 @@ namespace Opm {
             void applyInitial()
             {}
 
-            void linearize(JacobianMatrix& mat , GlobalEqVector& res);
+            void linearize(SparseMatrixAdapter& mat , GlobalEqVector& res);
 
             void postSolve(GlobalEqVector& deltaX)
             {
@@ -212,7 +210,7 @@ namespace Opm {
             void applyScaleAdd(const Scalar alpha, const BVector& x, BVector& Ax) const;
 
             // Check if well equations is converged.
-            bool getWellConvergence(const std::vector<Scalar>& B_avg) const;
+            ConvergenceReport getWellConvergence(const std::vector<Scalar>& B_avg) const;
 
             // return all the wells.
             const WellCollection& wellCollection() const;
@@ -302,7 +300,7 @@ namespace Opm {
             bool initial_step_;
 
             std::unique_ptr<RateConverterType> rateConverter_;
-            std::unique_ptr<VFPProperties> vfp_properties_;
+            std::unique_ptr<VFPProperties<VFPInjProperties,VFPProdProperties>> vfp_properties_;
 
             SimulatorReport last_report_;
 

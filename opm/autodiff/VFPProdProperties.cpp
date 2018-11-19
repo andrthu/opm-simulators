@@ -22,8 +22,6 @@
 #include <opm/autodiff/VFPProdProperties.hpp>
 #include <opm/core/props/BlackoilPhases.hpp>
 #include <opm/common/ErrorMacros.hpp>
-#include <opm/autodiff/AutoDiffBlock.hpp>
-#include <opm/autodiff/AutoDiffHelpers.hpp>
 #include <opm/material/densead/Math.hpp>
 #include <opm/material/densead/Evaluation.hpp>
 #include <opm/autodiff/VFPHelpers.hpp>
@@ -40,160 +38,24 @@ VFPProdProperties::VFPProdProperties() {
 }
 
 
-
 VFPProdProperties::VFPProdProperties(const VFPProdTable* table){
     m_tables[table->getTableNum()] = table;
 }
 
 
-
-
-VFPProdProperties::VFPProdProperties(const std::map<int, std::shared_ptr<const VFPProdTable> >& tables) {
+VFPProdProperties::VFPProdProperties(const VFPProdProperties::ProdTable& tables) {
     for (const auto& table : tables) {
         m_tables[table.first] = table.second.get();
     }
 }
 
-VFPProdProperties::ADB VFPProdProperties::bhp(const std::vector<int>& table_id,
-                                              const Wells& wells,
-                                              const ADB& qs,
-                                              const ADB& thp_arg,
-                                              const ADB& alq) const {
-    const int nw = wells.number_of_wells;
-
-    //Short-hands for water / oil / gas phases
-    //TODO enable support for two-phase.
-    assert(wells.number_of_phases == 3);
-    const ADB& w = subset(qs, Span(nw, 1, BlackoilPhases::Aqua*nw));
-    const ADB& o = subset(qs, Span(nw, 1, BlackoilPhases::Liquid*nw));
-    const ADB& g = subset(qs, Span(nw, 1, BlackoilPhases::Vapour*nw));
-
-    return bhp(table_id, w, o, g, thp_arg, alq);
-}
-
-
-VFPProdProperties::ADB VFPProdProperties::bhp(const std::vector<int>& table_id,
-                                              const ADB& aqua,
-                                              const ADB& liquid,
-                                              const ADB& vapour,
-                                              const ADB& thp_arg,
-                                              const ADB& alq) const {
-    const int nw = thp_arg.size();
-
-    std::vector<int> block_pattern = detail::commonBlockPattern(aqua, liquid, vapour, thp_arg, alq);
-
-    assert(static_cast<int>(table_id.size()) == nw);
-    assert(aqua.size()     == nw);
-    assert(liquid.size()   == nw);
-    assert(vapour.size()   == nw);
-    assert(thp_arg.size()      == nw);
-    assert(alq.size()      == nw);
-
-    //Allocate data for bhp's and partial derivatives
-    ADB::V value = ADB::V::Zero(nw);
-    ADB::V dthp = ADB::V::Zero(nw);
-    ADB::V dwfr = ADB::V::Zero(nw);
-    ADB::V dgfr = ADB::V::Zero(nw);
-    ADB::V dalq = ADB::V::Zero(nw);
-    ADB::V dflo = ADB::V::Zero(nw);
-
-    //Get the table for each well
-    std::vector<const VFPProdTable*> well_tables(nw, nullptr);
-    for (int i=0; i<nw; ++i) {
-        if (table_id[i] >= 0) {
-            well_tables[i] = detail::getTable(m_tables, table_id[i]);
-        }
-    }
-
-    //Get the right FLO/GFR/WFR variable for each well as a single ADB
-    const ADB flo = detail::combineADBVars<VFPProdTable::FLO_TYPE>(well_tables, aqua, liquid, vapour);
-    const ADB wfr = detail::combineADBVars<VFPProdTable::WFR_TYPE>(well_tables, aqua, liquid, vapour);
-    const ADB gfr = detail::combineADBVars<VFPProdTable::GFR_TYPE>(well_tables, aqua, liquid, vapour);
-
-    //Compute the BHP for each well independently
-    for (int i=0; i<nw; ++i) {
-        const VFPProdTable* table = well_tables[i];
-        if (table != nullptr) {
-            //First, find the values to interpolate between
-            //Value of FLO is negative in OPM for producers, but positive in VFP table
-            auto flo_i = detail::findInterpData(-flo.value()[i], table->getFloAxis());
-            auto thp_i = detail::findInterpData( thp_arg.value()[i], table->getTHPAxis());
-            auto wfr_i = detail::findInterpData( wfr.value()[i], table->getWFRAxis());
-            auto gfr_i = detail::findInterpData( gfr.value()[i], table->getGFRAxis());
-            auto alq_i = detail::findInterpData( alq.value()[i], table->getALQAxis());
-
-            detail::VFPEvaluation bhp_val = detail::interpolate(table->getTable(), flo_i, thp_i, wfr_i, gfr_i, alq_i);
-
-            value[i] = bhp_val.value;
-            dthp[i] = bhp_val.dthp;
-            dwfr[i] = bhp_val.dwfr;
-            dgfr[i] = bhp_val.dgfr;
-            dalq[i] = bhp_val.dalq;
-            dflo[i] = bhp_val.dflo;
-        }
-        else {
-            value[i] = -1e100; //Signal that this value has not been calculated properly, due to "missing" table
-        }
-    }
-
-    //Create diagonal matrices from ADB::Vs
-    ADB::M dthp_diag(dthp.matrix().asDiagonal());
-    ADB::M dwfr_diag(dwfr.matrix().asDiagonal());
-    ADB::M dgfr_diag(dgfr.matrix().asDiagonal());
-    ADB::M dalq_diag(dalq.matrix().asDiagonal());
-    ADB::M dflo_diag(dflo.matrix().asDiagonal());
-
-    //Calculate the Jacobians
-    const int num_blocks = block_pattern.size();
-    std::vector<ADB::M> jacs(num_blocks);
-    for (int block = 0; block < num_blocks; ++block) {
-        //Could have used fastSparseProduct and temporary variables
-        //but may not save too much on that.
-        jacs[block] = ADB::M(nw, block_pattern[block]);
-
-        if (!thp_arg.derivative().empty()) {
-            jacs[block] += dthp_diag * thp_arg.derivative()[block];
-        }
-        if (!wfr.derivative().empty()) {
-            jacs[block] += dwfr_diag * wfr.derivative()[block];
-        }
-        if (!gfr.derivative().empty()) {
-            jacs[block] += dgfr_diag * gfr.derivative()[block];
-        }
-        if (!alq.derivative().empty()) {
-            jacs[block] += dalq_diag * alq.derivative()[block];
-        }
-        if (!flo.derivative().empty()) {
-            jacs[block] -= dflo_diag * flo.derivative()[block];
-        }
-    }
-
-    ADB retval = ADB::function(std::move(value), std::move(jacs));
-    return retval;
-}
-
-
-
-double VFPProdProperties::bhp(int table_id,
-        const double& aqua,
-        const double& liquid,
-        const double& vapour,
-        const double& thp_arg,
-        const double& alq) const {
-    const VFPProdTable* table = detail::getTable(m_tables, table_id);
-
-    detail::VFPEvaluation retval = detail::bhp(table, aqua, liquid, vapour, thp_arg, alq);
-    return retval.value;
-}
-
-
 
 double VFPProdProperties::thp(int table_id,
-        const double& aqua,
-        const double& liquid,
-        const double& vapour,
-        const double& bhp_arg,
-        const double& alq) const {
+                              const double& aqua,
+                              const double& liquid,
+                              const double& vapour,
+                              const double& bhp_arg,
+                              const double& alq) const {
     const VFPProdTable* table = detail::getTable(m_tables, table_id);
     const VFPProdTable::array_type& data = table->getTable();
 
@@ -226,17 +88,168 @@ double VFPProdProperties::thp(int table_id,
 }
 
 
+double VFPProdProperties::bhp(int table_id,
+                              const double& aqua,
+                              const double& liquid,
+                              const double& vapour,
+                              const double& thp_arg,
+                              const double& alq) const {
+    const VFPProdTable* table = detail::getTable(m_tables, table_id);
 
-
+    detail::VFPEvaluation retval = detail::bhp(table, aqua, liquid, vapour, thp_arg, alq);
+    return retval.value;
+}
 
 
 const VFPProdTable* VFPProdProperties::getTable(const int table_id) const {
     return detail::getTable(m_tables, table_id);
 }
 
+bool VFPProdProperties::hasTable(const int table_id) const {
+    return detail::hasTable(m_tables, table_id);
+}
+
+
+std::vector<double>
+VFPProdProperties::
+bhpwithflo(const std::vector<double>& flos,
+           const int table_id,
+           const double wfr,
+           const double gfr,
+           const double thp,
+           const double alq,
+           const double dp) const
+{
+    // Get the table
+    const VFPProdTable* table = detail::getTable(m_tables, table_id);
+    const auto thp_i = detail::findInterpData( thp, table->getTHPAxis()); // assume constant
+    const auto wfr_i = detail::findInterpData( wfr, table->getWFRAxis());
+    const auto gfr_i = detail::findInterpData( gfr, table->getGFRAxis());
+    const auto alq_i = detail::findInterpData( alq, table->getALQAxis()); //assume constant
+
+    std::vector<double> bhps(flos.size(), 0.);
+    for (size_t i = 0; i < flos.size(); ++i) {
+        // Value of FLO is negative in OPM for producers, but positive in VFP table
+        const auto flo_i = detail::findInterpData(-flos[i], table->getFloAxis());
+        const detail::VFPEvaluation bhp_val = detail::interpolate(table->getTable(), flo_i, thp_i, wfr_i, gfr_i, alq_i);
+
+        // TODO: this kind of breaks the conventions for the functions here by putting dp within the function
+        bhps[i] = bhp_val.value - dp;
+    }
+
+    return bhps;
+}
 
 
 
+
+
+double
+VFPProdProperties::
+calculateBhpWithTHPTarget(const std::vector<double>& ipr_a,
+                          const std::vector<double>& ipr_b,
+                          const double bhp_limit,
+                          const double thp_table_id,
+                          const double thp_limit,
+                          const double alq,
+                          const double dp) const
+{
+    // For producers, bhp_safe_limit is the highest BHP value that can still produce based on IPR
+    double bhp_safe_limit = 1.e100;
+    for (size_t i = 0; i < ipr_a.size(); ++i) {
+        if (ipr_b[i] == 0.) continue;
+
+        const double bhp = ipr_a[i] / ipr_b[i];
+        if (bhp < bhp_safe_limit) {
+            bhp_safe_limit = bhp;
+        }
+    }
+
+    // Here, we use the middle point between the bhp_limit and bhp_safe_limit to calculate the ratio of the flow
+    // and the middle point serves one of the two points to describe inflow performance relationship line
+    const double bhp_middle = (bhp_limit + bhp_safe_limit) / 2.0;
+
+    // FLO is the rate based on the type specified with the VFP table
+    // The two points correspond to the bhp values of bhp_limit, and the middle of bhp_limit and bhp_safe_limit
+    // for producers, the rates are negative
+    std::vector<double> rates_bhp_limit(ipr_a.size());
+    std::vector<double> rates_bhp_middle(ipr_a.size());
+    for (size_t i = 0; i < rates_bhp_limit.size(); ++i) {
+        rates_bhp_limit[i] = bhp_limit * ipr_b[i] - ipr_a[i];
+        rates_bhp_middle[i] = bhp_middle * ipr_b[i] - ipr_a[i];
+    }
+
+    // TODO: we need to be careful that there is nothings wrong related to the indices here
+    const int Water = BlackoilPhases::Aqua;
+    const int Oil = BlackoilPhases::Liquid;
+    const int Gas = BlackoilPhases::Vapour;
+
+    const VFPProdTable* table = detail::getTable(m_tables, thp_table_id);
+    const double aqua_bhp_limit = rates_bhp_limit[Water];
+    const double liquid_bhp_limit = rates_bhp_limit[Oil];
+    const double vapour_bhp_limit = rates_bhp_limit[Gas];
+    const double flo_bhp_limit = detail::getFlo(aqua_bhp_limit, liquid_bhp_limit, vapour_bhp_limit, table->getFloType() );
+
+    const double aqua_bhp_middle = rates_bhp_middle[Water];
+    const double liquid_bhp_middle = rates_bhp_middle[Oil];
+    const double vapour_bhp_middle = rates_bhp_middle[Gas];
+    const double flo_bhp_middle = detail::getFlo(aqua_bhp_middle, liquid_bhp_middle, vapour_bhp_middle, table->getFloType() );
+
+    // we use the ratios based on the middle value of bhp_limit and bhp_safe_limit
+    const double wfr = detail::getWFR(aqua_bhp_middle, liquid_bhp_middle, vapour_bhp_middle, table->getWFRType());
+    const double gfr = detail::getGFR(aqua_bhp_middle, liquid_bhp_middle, vapour_bhp_middle, table->getGFRType());
+
+    // we get the flo sampling points from the table,
+    // then extend it with zero and rate under bhp_limit for extrapolation
+    std::vector<double> flo_samples = table->getFloAxis();
+
+    if (flo_samples[0] > 0.) {
+        flo_samples.insert(flo_samples.begin(), 0.);
+    }
+
+    if (flo_samples.back() < std::abs(flo_bhp_limit)) {
+        flo_samples.push_back(std::abs(flo_bhp_limit));
+    }
+
+    // kind of unncessarily following the tradation that producers should have negative rates
+    // the key is here that it should be consistent with the function bhpwithflo
+    for (double& value : flo_samples) {
+        value = -value;
+    }
+
+    // get the bhp sampling values based on the flo sample values
+    const std::vector<double> bhp_flo_samples = bhpwithflo(flo_samples, thp_table_id, wfr, gfr, thp_limit, alq, dp);
+
+    std::vector<detail::RateBhpPair> ratebhp_samples;
+    for (size_t i = 0; i < flo_samples.size(); ++i) {
+        ratebhp_samples.push_back( detail::RateBhpPair{flo_samples[i], bhp_flo_samples[i]} );
+    }
+
+    const std::array<detail::RateBhpPair, 2> ratebhp_twopoints_ipr {detail::RateBhpPair{flo_bhp_middle, bhp_middle},
+                                                                    detail::RateBhpPair{flo_bhp_limit, bhp_limit} };
+
+    double obtain_bhp = 0.;
+    const bool obtain_solution_with_thp_limit = detail::findIntersectionForBhp(ratebhp_samples, ratebhp_twopoints_ipr, obtain_bhp);
+
+    // \Note: assuming not that negative BHP does not make sense
+    if (obtain_solution_with_thp_limit && obtain_bhp > 0.) {
+        // getting too high bhp that might cause negative rates (rates in the undesired direction)
+        if (obtain_bhp >= bhp_safe_limit) {
+            const std::string msg (" We are getting a too high BHP value from the THP constraint, which may "
+                                   " cause problems later ");
+            OpmLog::info("TOO_HIGH_BHP_FOUND_THP_TARGET", msg);
+
+            const std::string debug_msg = " obtain_bhp " + std::to_string(obtain_bhp)
+                                        + " bhp_safe_limit " + std::to_string(bhp_safe_limit)
+                                        + " thp limit " + std::to_string(thp_limit);
+            OpmLog::debug(debug_msg);
+        }
+        return obtain_bhp;
+    } else {
+        OpmLog::warning("NO_BHP_FOUND_THP_TARGET", " we could not find a bhp value with thp target.");
+        return -100.;
+    }
+}
 
 
 
