@@ -500,6 +500,12 @@ namespace Opm {
                 infoFile<<"EpisodeIndex: "<< ebosSimulator_.episodeIndex()<<" Current time: "<<ebosSimulator_.time() <<" Number of iterations: " << it << "\n";
                 infoFile.close();
             }
+	    /*
+	      int max_it = istlSolver().max_iterations();
+	      auto& rhs = ebosSimulator_.model().linearizer().residual();
+	      istlSolver().solve( opA, x, ebosResid );
+	      storeMatrixWhenDifficult(ebosJac, rhs, max_it);
+	    */
         }
 
         /// Solve the Jacobian system Jx = r where J is the Jacobian and
@@ -544,11 +550,8 @@ namespace Opm {
             {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
                 Operator opA(ebosJac, actual_mat_for_prec, wellModel());
-
-                int max_it = istlSolver().max_iterations();
-                auto& rhs = ebosSimulator_.model().linearizer().residual();
-                istlSolver().solve( opA, x, ebosResid );
-                storeMatrixWhenDifficult(ebosJac, rhs, max_it);
+		istlSolver().solve( opA, x, ebosResid );
+		
             }
         }
 
