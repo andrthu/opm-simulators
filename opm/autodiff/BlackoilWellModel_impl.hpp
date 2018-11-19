@@ -94,7 +94,7 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    linearize(JacobianMatrix& mat , GlobalEqVector& res)
+    linearize(SparseMatrixAdapter& mat , GlobalEqVector& res)
     {
         if (!localWellsActive())
             return;
@@ -196,7 +196,7 @@ namespace Opm {
         computeRESV(timeStepIdx);
 
         // update VFP properties
-        vfp_properties_.reset (new VFPProperties (
+        vfp_properties_.reset (new VFPProperties<VFPInjProperties,VFPProdProperties> (
                                    schedule().getVFPInjTables(timeStepIdx),
                                    schedule().getVFPProdTables(timeStepIdx)) );
 
@@ -314,6 +314,19 @@ namespace Opm {
             well->calculateReservoirRates(well_state_);
         }
         updateWellTestState(simulationTime, wellTestState_);
+
+        // calculate the well potentials for output
+        // TODO: when necessary
+        try
+        {
+            std::vector<double> well_potentials;
+            computeWellPotentials(well_potentials);
+        }
+        catch ( std::runtime_error& e )
+        {
+            const std::string msg = "A zero well potential is returned for output purposes. ";
+            OpmLog::warning("WELL_POTENTIAL_CALCULATION_FAILED", msg);
+        }
         previous_well_state_ = well_state_;
     }
 
@@ -699,7 +712,6 @@ namespace Opm {
     BlackoilWellModel<TypeTag>::
     solveWellEq(const double dt)
     {
-        const int nw = numWells();
         WellState well_state0 = well_state_;
 
         const int numComp = numComponents();
@@ -713,7 +725,8 @@ namespace Opm {
         do {
             assembleWellEq(dt);
 
-            converged = getWellConvergence(B_avg);
+            const auto report = getWellConvergence(B_avg);
+            converged = report.converged();
 
             // checking whether the group targets are converged
             if (wellCollection().groupControlActive()) {
@@ -753,9 +766,10 @@ namespace Opm {
             well_state_ = well_state0;
             updatePrimaryVariables();
             // also recover the old well controls
-            for (int w = 0; w < nw; ++w) {
-                WellControls* wc = well_container_[w]->wellControls();
-                well_controls_set_current(wc, well_state_.currentControls()[w]);
+            for (const auto& well : well_container_) {
+                const int index_of_well = well->indexOfWell();
+                WellControls* wc = well->wellControls();
+                well_controls_set_current(wc, well_state_.currentControls()[index_of_well]);
             }
         }
 
@@ -770,65 +784,35 @@ namespace Opm {
 
 
     template<typename TypeTag>
-    bool
+    ConvergenceReport
     BlackoilWellModel<TypeTag>::
     getWellConvergence(const std::vector<Scalar>& B_avg) const
     {
-        ConvergenceReport report;
-
+        // Get global (from all processes) convergence report.
+        ConvergenceReport local_report;
         for (const auto& well : well_container_) {
-            report += well->getWellConvergence(B_avg);
+            local_report += well->getWellConvergence(B_avg);
         }
+        ConvergenceReport report = gatherConvergenceReport(local_report);
+
+        // Log debug messages for NaN or too large residuals.
+        for (const auto& f : report.wellFailures()) {
+            if (f.severity() == ConvergenceReport::Severity::NotANumber) {
+                OpmLog::debug("NaN residual found with phase " + std::to_string(f.phase()) + " for well " + f.wellName());
+            } else if (f.severity() == ConvergenceReport::Severity::TooLarge) {
+                OpmLog::debug("Too large residual found with phase " + std::to_string(f.phase()) + " for well " + f.wellName());
+            }
+        }
+
+        // Throw if any NaN or too large residual found.
         ConvergenceReport::Severity severity = report.severityOfWorstFailure();
-
-        // checking NaN residuals
-        {
-            // Debug reporting.
-            for (const auto& f : report.wellFailures()) {
-                if (f.severity() == ConvergenceReport::Severity::NotANumber) {
-                    OpmLog::debug("NaN residual found with phase " + std::to_string(f.phase()) + " for well " + f.wellName());
-                }
-            }
-
-            // Throw if any nan residual found.
-            bool nan_residual_found = (severity == ConvergenceReport::Severity::NotANumber);
-            const auto& grid = ebosSimulator_.vanguard().grid();
-            int value = nan_residual_found ? 1 : 0;
-            nan_residual_found = grid.comm().max(value);
-            if (nan_residual_found) {
-                OPM_THROW(Opm::NumericalIssue, "NaN residual found!");
-            }
+        if (severity == ConvergenceReport::Severity::NotANumber) {
+            OPM_THROW(Opm::NumericalIssue, "NaN residual found!");
+        } else if (severity == ConvergenceReport::Severity::TooLarge) {
+            OPM_THROW(Opm::NumericalIssue, "Too large residual found!");
         }
 
-        // checking too large residuals
-        {
-            // Debug reporting.
-            for (const auto& f : report.wellFailures()) {
-                if (f.severity() == ConvergenceReport::Severity::TooLarge) {
-                    OpmLog::debug("Too large residual found with phase " + std::to_string(f.phase()) + " for well " + f.wellName());
-                }
-            }
-
-            // Throw if any too large residual found.
-            bool too_large_residual_found = (severity == ConvergenceReport::Severity::TooLarge);
-            const auto& grid = ebosSimulator_.vanguard().grid();
-            int value = too_large_residual_found ? 1 : 0;
-            too_large_residual_found = grid.comm().max(value);
-            if (too_large_residual_found) {
-                OPM_THROW(Opm::NumericalIssue, "Too large residual found!");
-            }
-        }
-
-        // checking convergence
-        bool converged_well = report.converged();
-        {
-            const auto& grid = ebosSimulator_.vanguard().grid();
-            int value = converged_well ? 1 : 0;
-
-            converged_well = grid.comm().min(value);
-        }
-
-        return converged_well;
+        return report;
     }
 
 
@@ -860,12 +844,10 @@ namespace Opm {
         // we simply return.
         if( !wellsActive() ) return ;
 
-#if HAVE_OPENMP
-#endif // HAVE_OPENMP
         wellhelpers::WellSwitchingLogger logger;
 
         for (const auto& well : well_container_) {
-            well->updateWellControl(well_state_, logger);
+            well->updateWellControl(ebosSimulator_, well_state_, logger);
         }
 
         updateGroupControls();
@@ -897,15 +879,31 @@ namespace Opm {
         const int np = numPhases();
         well_potentials.resize(nw * np, 0.0);
 
+        const Opm::SummaryConfig summaryConfig = ebosSimulator_.vanguard().summaryConfig();
         for (const auto& well : well_container_) {
-            std::vector<double> potentials;
-            well->computeWellPotentials(ebosSimulator_, well_state_, potentials);
+            // Only compute the well potential when asked for
+            bool needed_for_output = ((summaryConfig.hasSummaryKey( "WWPI:" + well->name()) ||
+                                       summaryConfig.hasSummaryKey( "WOPI:" + well->name()) ||
+                                       summaryConfig.hasSummaryKey( "WGPI:" + well->name())) && well->wellType() == INJECTOR) ||
+                                    ((summaryConfig.hasSummaryKey( "WWPP:" + well->name()) ||
+                                                       summaryConfig.hasSummaryKey( "WOPP:" + well->name()) ||
+                                                       summaryConfig.hasSummaryKey( "WGPP:" + well->name())) && well->wellType() == PRODUCER);
 
-            // putting the sucessfully calculated potentials to the well_potentials
-            for (int p = 0; p < np; ++p) {
-                well_potentials[well->indexOfWell() * np + p] = std::abs(potentials[p]);
+            if (needed_for_output || wellCollection().requireWellPotentials())
+            {
+                std::vector<double> potentials;
+                well->computeWellPotentials(ebosSimulator_, well_state_, potentials);
+
+                // putting the sucessfully calculated potentials to the well_potentials
+                for (int p = 0; p < np; ++p) {
+                    well_potentials[well->indexOfWell() * np + p] = std::abs(potentials[p]);
+                }
             }
         } // end of for (int w = 0; w < nw; ++w)
+
+        // Store it in the well state
+        well_state_.wellPotentials() = well_potentials;
+
     }
 
 
@@ -940,7 +938,7 @@ namespace Opm {
             well_state_.currentControls()[w] = control;
 
             if (well_state_.effectiveEventsOccurred(w) ) {
-                well->updateWellStateWithTarget(well_state_);
+                well->updateWellStateWithTarget(ebosSimulator_, well_state_);
             }
 
             // there is no new well control change input within a report step,
@@ -1188,7 +1186,7 @@ namespace Opm {
 
             // TODO: we should only do the well is involved in the update group targets
             for (auto& well : well_container_) {
-                well->updateWellStateWithTarget(well_state_);
+                well->updateWellStateWithTarget(ebosSimulator_, well_state_);
                 well->updatePrimaryVariables(well_state_);
             }
         }

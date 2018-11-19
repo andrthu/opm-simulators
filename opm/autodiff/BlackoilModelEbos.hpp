@@ -35,7 +35,6 @@
 #include <opm/autodiff/BlackoilAquiferModel.hpp>
 #include <opm/autodiff/WellConnectionAuxiliaryModule.hpp>
 #include <opm/autodiff/BlackoilDetails.hpp>
-#include <opm/autodiff/NewtonIterationBlackoilInterface.hpp>
 
 #include <opm/grid/UnstructuredGrid.h>
 #include <opm/core/simulator/SimulatorReport.hpp>
@@ -109,6 +108,7 @@ namespace Opm {
         typedef typename GET_PROP_TYPE(TypeTag, Simulator)         Simulator;
         typedef typename GET_PROP_TYPE(TypeTag, Grid)              Grid;
         typedef typename GET_PROP_TYPE(TypeTag, ElementContext)    ElementContext;
+        typedef typename GET_PROP_TYPE(TypeTag, SparseMatrixAdapter) SparseMatrixAdapter;
         typedef typename GET_PROP_TYPE(TypeTag, SolutionVector)    SolutionVector ;
         typedef typename GET_PROP_TYPE(TypeTag, PrimaryVariables)  PrimaryVariables ;
         typedef typename GET_PROP_TYPE(TypeTag, FluidSystem)       FluidSystem;
@@ -126,8 +126,8 @@ namespace Opm {
         static const int temperatureIdx = Indices::temperatureIdx;
 
         typedef Dune::FieldVector<Scalar, numEq >        VectorBlockType;
-        typedef Dune::FieldMatrix<Scalar, numEq, numEq >        MatrixBlockType;
-        typedef Dune::BCRSMatrix <MatrixBlockType>      Mat;
+        typedef typename SparseMatrixAdapter::MatrixBlock MatrixBlockType;
+        typedef typename SparseMatrixAdapter::IstlMatrix Mat;
         typedef Dune::BlockVector<VectorBlockType>      BVector;
 
         typedef ISTLSolverEbos<TypeTag> ISTLSolverType;
@@ -148,7 +148,7 @@ namespace Opm {
         BlackoilModelEbos(Simulator& ebosSimulator,
                           const ModelParameters& param,
                           BlackoilWellModel<TypeTag>& well_model,
-                          const NewtonIterationBlackoilInterface& linsolver,
+                          const ISTLSolverType& linsolver,
                           const bool terminal_output)
         : ebosSimulator_(ebosSimulator)
         , grid_(ebosSimulator_.vanguard().grid())
@@ -358,13 +358,13 @@ namespace Opm {
             ebosSimulator_.model().linearizer().linearize();
             ebosSimulator_.problem().endIteration();
 
-            auto& ebosJac = ebosSimulator_.model().linearizer().matrix();
+            auto& ebosJac = ebosSimulator_.model().linearizer().jacobian();
             if (param_.matrix_add_well_contributions_) {
-                wellModel().addWellContributions(ebosJac);
+                wellModel().addWellContributions(ebosJac.istlMatrix());
             }
             if ( param_.preconditioner_add_well_contributions_ &&
                                   ! param_.matrix_add_well_contributions_ ) {
-                matrix_for_preconditioner_ .reset(new Mat(ebosJac));
+                matrix_for_preconditioner_ .reset(new Mat(ebosJac.istlMatrix()));
                 wellModel().addWellContributions(*matrix_for_preconditioner_);
             }
 
@@ -521,7 +521,7 @@ namespace Opm {
             // r = [r, r_well], where r is the residual and r_well the well residual.
             // r -= B^T * D^-1 r_well
 
-            auto& ebosJac = ebosSimulator_.model().linearizer().matrix();
+            auto& ebosJac = ebosSimulator_.model().linearizer().jacobian();
             auto& ebosResid = ebosSimulator_.model().linearizer().residual();
 
             wellModel().apply(ebosResid);
@@ -529,13 +529,13 @@ namespace Opm {
             // set initial guess
             x = 0.0;
 
-            const Mat& actual_mat_for_prec = matrix_for_preconditioner_ ? *matrix_for_preconditioner_.get() : ebosJac;
+            const Mat& actual_mat_for_prec = matrix_for_preconditioner_ ? *matrix_for_preconditioner_.get() : ebosJac.istlMatrix();
             // Solve system.
             if( isParallel() )
             {	      
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, true > Operator;
 
-                auto ebosJacIgnoreOverlap = Mat(ebosJac);
+                auto ebosJacIgnoreOverlap = Mat(ebosJac.istlMatrix());
                 //remove ghost rows in local matrix
                 makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
 
@@ -549,9 +549,9 @@ namespace Opm {
             else
             {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
-                Operator opA(ebosJac, actual_mat_for_prec, wellModel());
-		istlSolver().solve( opA, x, ebosResid );
-		
+                Operator opA(ebosJac.istlMatrix(), actual_mat_for_prec, wellModel());
+                istlSolver().solve( opA, x, ebosResid );
+
             }
         }
 
@@ -733,26 +733,12 @@ namespace Opm {
             return pvSum;
         }
 
-        /// Compute convergence based on total mass balance (tol_mb) and maximum
-        /// residual mass balance (tol_cnv).
-        /// \param[in]   timer       simulation timer
-        /// \param[in]   dt          timestep length
-        /// \param[in]   iteration   current iteration number
-        bool getConvergence(const SimulatorTimerInterface& timer, const int iteration, std::vector<double>& residual_norms)
+        // Get reservoir quantities on this process needed for convergence calculations.
+        double localConvergenceData(std::vector<Scalar>& R_sum,
+                                    std::vector<Scalar>& maxCoeff,
+                                    std::vector<Scalar>& B_avg)
         {
-            typedef std::vector< Scalar > Vector;
-
-            const double dt = timer.currentStepLength();
-            const double tol_mb    = param_.tolerance_mb_;
-            const double tol_cnv   = param_.tolerance_cnv_;
-            const double tol_cnv_relaxed = param_.tolerance_cnv_relaxed_;
-
-            const int numComp = numEq;
-
-            Vector R_sum(numComp, 0.0 );
-            Vector B_avg(numComp, 0.0 );
-            Vector maxCoeff(numComp, std::numeric_limits< Scalar >::lowest() );
-
+            double pvSumLocal = 0.0;
             const auto& ebosModel = ebosSimulator_.model();
             const auto& ebosProblem = ebosSimulator_.problem();
 
@@ -762,7 +748,6 @@ namespace Opm {
             const auto& gridView = ebosSimulator().gridView();
             const auto& elemEndIt = gridView.template end</*codim=*/0, Dune::Interior_Partition>();
 
-            double pvSumLocal = 0.0;
             for (auto elemIt = gridView.template begin</*codim=*/0, Dune::Interior_Partition>();
                  elemIt != elemEndIt;
                  ++elemIt)
@@ -820,9 +805,29 @@ namespace Opm {
                 B_avg[ i ] /= Scalar( global_nc_ );
             }
 
-            // TODO: we remove the maxNormWell for now because the convergence of wells are on a individual well basis.
-            // Anyway, we need to provide some infromation to help debug the well iteration process.
+            return pvSumLocal;
+        }
 
+        /// Compute convergence based on total mass balance (tol_mb) and maximum
+        /// residual mass balance (tol_cnv).
+        /// \param[in]   timer       simulation timer
+        /// \param[in]   dt          timestep length
+        /// \param[in]   iteration   current iteration number
+        bool getConvergence(const SimulatorTimerInterface& timer, const int iteration, std::vector<double>& residual_norms)
+        {
+            typedef std::vector< Scalar > Vector;
+
+            const double dt = timer.currentStepLength();
+            const double tol_mb    = param_.tolerance_mb_;
+            const double tol_cnv   = param_.tolerance_cnv_;
+            const double tol_cnv_relaxed = param_.tolerance_cnv_relaxed_;
+
+            const int numComp = numEq;
+
+            Vector R_sum(numComp, 0.0 );
+            Vector maxCoeff(numComp, std::numeric_limits< Scalar >::lowest() );
+            Vector B_avg(numComp, 0.0 );
+            const double pvSumLocal = localConvergenceData(R_sum, maxCoeff, B_avg);
 
             // compute global sum and max of quantities
             const double pvSum = convergenceReduction(grid_.comm(), pvSumLocal,
@@ -847,9 +852,10 @@ namespace Opm {
                 residual_norms.push_back(CNV[compIdx]);
             }
 
-            const bool converged_Well = wellModel().getWellConvergence(B_avg);
+            const auto report_well = wellModel().getWellConvergence(B_avg);
+            const bool converged_well = report_well.converged();
 
-            bool converged = converged_MB && converged_Well;
+            bool converged = converged_MB && converged_well;
 
             converged = converged && converged_CNV;
 
