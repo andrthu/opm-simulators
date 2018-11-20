@@ -480,8 +480,83 @@ namespace Opm {
                 }
             }    	  
         }
+	
+	template<class MatForOut>
+	void writeMatrixMarketMatrixFormat(const MatForOut& Jac, std::ofstream& f) const
+	{
+	    f << "%%MatrixMarket matrix coordinate real general\n";
+	    f << "% ISTL_STRUCT blocked "<< numEq << " " << numEq << "\n";
+	    f << Jac.N() << " " << Jac.M() << " " << Jac.nonzeroes()*9 << "\n";
+	    /*
+	    auto lid = grid_.localIdSet();
 
-	void storeMatrixWhenDifficult(const Mat& Jac,BVector& rhs,int max_it) const
+	    const auto& gridView = grid_.leafGridView();
+	    auto elemIt = gridView.template begin<0>();
+	    const auto& elemEndIt = gridView.template end<0>();
+	    
+	    //loop over cells in mesh
+	    for (; elemIt != elemEndIt; ++elemIt) 
+            {		
+		const auto& elem = *elemIt;
+				    
+		//local id of overlap cell
+		int lcell = lid.id(elem);
+		for (int eqr = 0; eqr < numEq; ++eqr) {
+		    for (int eqc = 0; eqc < numEq; ++eqc) {
+			f << 3*lcell + eqr << " " << 3*lcell + eqc << " " << Jac[lcell][lcell][eqr][eqc] << "\n";
+		    }
+		}
+
+		auto isend = gridView.iend(elem);
+		for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
+                {
+		    if (is->neighbor())
+		    {
+			int ncell = lid.id(is->outside());			    
+			
+			for (int eqr = 0; eqr < numEq; ++eqr) {
+			    for (int eqc = 0; eqc < numEq; ++eqc) {
+				f << 3*lcell + eqr << " " << 3*ncell + eqc << " " << Jac[lcell][ncell][eqr][eqc] << "\n";
+			    }
+			}
+			
+		    }		
+		}	    
+	    }    
+	    */
+	    
+	    for (auto row = Jac.begin(); row != Jac.end(); ++row) {
+		
+		for (auto col = row->begin(); col != row->end(); ++col) {
+		    
+		    int rowI = row.index();
+		    int colI = col.index();
+		    for (int eqr = 0; eqr < numEq; ++eqr) {
+			for (int eqc = 0; eqc < numEq; ++eqc) {
+			    f << 3*rowI + eqr + 1<< " " << 3*colI + eqc + 1 << " " << Jac[rowI][colI][eqr][eqc] << "\n";
+			}
+		    }
+		}
+	    }
+	    
+	}
+	
+	void writeMatrixMarketVectorFormat(BVector& rhs, std::ofstream& f) const
+	{
+	    f << "%%MatrixMarket matrix array real general\n";
+	    f << "% ISTL_STRUCT blocked "<< numEq << " 1\n";
+	    f << rhs.size()*numEq << " " << 1 <<  "\n";
+	    
+	    for (size_t el = 0; el < rhs.size(); ++el)
+	    {
+		for (int eq = 0; eq < numEq; ++eq)
+		    f << rhs[el][eq] << "\n";
+	    }
+	    
+	}
+	
+	template<class MatForOut>
+	void storeMatrixWhenDifficult(const MatForOut& Jac, BVector& rhs, int max_it) const
         {
             int it = linearIterationsLastSolve();
 	    
@@ -489,20 +564,23 @@ namespace Opm {
             {
                 std::ofstream MatFile ("BlackoilMatrix.mtx");
                 std::ofstream VecFile ("BlackoilRHS.vec");
-                Dune::writeMatrixMarket(Jac,MatFile);
-                Dune::writeMatrixMarket(rhs,VecFile);
+		writeMatrixMarketMatrixFormat(Jac, MatFile);
+		writeMatrixMarketVectorFormat(rhs, VecFile);
+                //Dune::writeMatrixMarket(Jac,MatFile);
+                //Dune::writeMatrixMarket(rhs,VecFile);
                 MatFile.close();
                 VecFile.close();
                 
                 
                 std:: ofstream infoFile;
-                infoFile.open("MatrixInfo.txt",std::ofstream::app);
-                infoFile<<"EpisodeIndex: "<< ebosSimulator_.episodeIndex()<<" Current time: "<<ebosSimulator_.time() <<" Number of iterations: " << it << "\n";
+                infoFile.open("MatrixInfo.txt", std::ofstream::app);
+                infoFile<< "EpisodeIndex: "<< ebosSimulator_.episodeIndex() << " Current time: " <<ebosSimulator_.time() << " Number of iterations: " << it << "\n";
                 infoFile.close();
             }
 	    
         }
-
+	
+	
         /// Solve the Jacobian system Jx = r where J is the Jacobian and
         /// r is the residual.
         void solveJacobianSystem(BVector& x) const
