@@ -487,43 +487,6 @@ namespace Opm {
 	    f << "%%MatrixMarket matrix coordinate real general\n";
 	    f << "% ISTL_STRUCT blocked "<< numEq << " " << numEq << "\n";
 	    f << Jac.N() << " " << Jac.M() << " " << Jac.nonzeroes()*9 << "\n";
-	    /*
-	    auto lid = grid_.localIdSet();
-
-	    const auto& gridView = grid_.leafGridView();
-	    auto elemIt = gridView.template begin<0>();
-	    const auto& elemEndIt = gridView.template end<0>();
-	    
-	    //loop over cells in mesh
-	    for (; elemIt != elemEndIt; ++elemIt) 
-            {		
-		const auto& elem = *elemIt;
-				    
-		//local id of overlap cell
-		int lcell = lid.id(elem);
-		for (int eqr = 0; eqr < numEq; ++eqr) {
-		    for (int eqc = 0; eqc < numEq; ++eqc) {
-			f << 3*lcell + eqr << " " << 3*lcell + eqc << " " << Jac[lcell][lcell][eqr][eqc] << "\n";
-		    }
-		}
-
-		auto isend = gridView.iend(elem);
-		for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
-                {
-		    if (is->neighbor())
-		    {
-			int ncell = lid.id(is->outside());			    
-			
-			for (int eqr = 0; eqr < numEq; ++eqr) {
-			    for (int eqc = 0; eqc < numEq; ++eqc) {
-				f << 3*lcell + eqr << " " << 3*ncell + eqc << " " << Jac[lcell][ncell][eqr][eqc] << "\n";
-			    }
-			}
-			
-		    }		
-		}	    
-	    }    
-	    */
 	    
 	    for (auto row = Jac.begin(); row != Jac.end(); ++row) {
 		
@@ -538,7 +501,6 @@ namespace Opm {
 		    }
 		}
 	    }
-	    
 	}
 	
 	void writeMatrixMarketVectorFormat(BVector& rhs, std::ofstream& f) const
@@ -552,7 +514,6 @@ namespace Opm {
 		for (int eq = 0; eq < numEq; ++eq)
 		    f << rhs[el][eq] << "\n";
 	    }
-	    
 	}
 	
 	template<class MatForOut>
@@ -569,15 +530,13 @@ namespace Opm {
                 //Dune::writeMatrixMarket(Jac,MatFile);
                 //Dune::writeMatrixMarket(rhs,VecFile);
                 MatFile.close();
-                VecFile.close();
-                
+                VecFile.close();   
                 
                 std:: ofstream infoFile;
                 infoFile.open("MatrixInfo.txt", std::ofstream::app);
                 infoFile<< "EpisodeIndex: "<< ebosSimulator_.episodeIndex() << " Current time: " <<ebosSimulator_.time() << " Number of iterations: " << it << "\n";
                 infoFile.close();
             }
-	    
         }
 	
 	
