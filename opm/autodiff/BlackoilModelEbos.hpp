@@ -486,17 +486,17 @@ namespace Opm {
 	{
 	    f << "%%MatrixMarket matrix coordinate real general\n";
 	    f << "% ISTL_STRUCT blocked "<< numEq << " " << numEq << "\n";
-	    f << Jac.N() << " " << Jac.M() << " " << Jac.nonzeroes()*9 << "\n";
+	    f << numEq*Jac.N() << " " << numEq*Jac.M() << " " << numEq*numEq*Jac.nonzeroes() << "\n";
 	    
 	    for (auto row = Jac.begin(); row != Jac.end(); ++row) {
-		
 		for (auto col = row->begin(); col != row->end(); ++col) {
-		    
 		    int rowI = row.index();
 		    int colI = col.index();
 		    for (int eqr = 0; eqr < numEq; ++eqr) {
 			for (int eqc = 0; eqc < numEq; ++eqc) {
-			    f << 3*rowI + eqr + 1<< " " << 3*colI + eqc + 1 << " " << Jac[rowI][colI][eqr][eqc] << "\n";
+			    int rowOut = 3*rowI + eqr + 1;
+			    int colOut = 3*colI + eqc + 1;
+			    f << rowOut << " " << colOut << " " << Jac[rowI][colI][eqr][eqc] << "\n";
 			}
 		    }
 		}
@@ -534,7 +534,7 @@ namespace Opm {
                 
                 std:: ofstream infoFile;
                 infoFile.open("MatrixInfo.txt", std::ofstream::app);
-                infoFile<< "EpisodeIndex: "<< ebosSimulator_.episodeIndex() << " Current time: " <<ebosSimulator_.time() << " Number of iterations: " << it << "\n";
+                infoFile << "EpisodeIndex: " << ebosSimulator_.episodeIndex() << " Current time: " << ebosSimulator_.time() << " Number of iterations: " << it << "\n";
                 infoFile.close();
             }
         }
@@ -584,7 +584,7 @@ namespace Opm {
                 Operator opA(ebosJac.istlMatrix(), actual_mat_for_prec, wellModel());
                 
                 int max_it = istlSolver().max_iterations();
-                auto& rhs = ebosSimulator_.model().linearizer().residual();
+                BVector rhs = BVector(ebosResid);
                 istlSolver().solve( opA, x, ebosResid );
                 storeMatrixWhenDifficult(ebosJac.istlMatrix(), rhs, max_it);
             }
