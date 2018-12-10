@@ -524,7 +524,7 @@ namespace Opm {
 	}
 	
 	template<class MatForOut>
-	void storeMatrixWhenDifficult(const MatForOut& Jac, BVector& rhs, int max_it) const
+	void storeMatrixWhenDifficult(const MatForOut& Jac, BVector& rhs, int max_it, const WellModel& wellMod) const
         {
             int it = linearIterationsLastSolve();
 	    
@@ -543,6 +543,12 @@ namespace Opm {
                 infoFile.open("MatrixInfo.txt", std::ofstream::app);
                 infoFile << "EpisodeIndex: " << ebosSimulator_.episodeIndex() << " Current time: " << ebosSimulator_.time() << " Number of iterations: " << it << "\n";
                 infoFile.close();
+
+		auto well_col = wellMod.wellCollection();
+		
+		int wellNum = 0;
+		for (auto& well : well_col ) {
+		    std::cout << "Well num: "<< wellNum << std::cout;
             }
         }
 	
@@ -593,7 +599,7 @@ namespace Opm {
                 int max_it = istlSolver().max_iterations();
                 BVector rhs = BVector(ebosResid);
                 istlSolver().solve( opA, x, ebosResid );
-                storeMatrixWhenDifficult(ebosJac.istlMatrix(), rhs, max_it);
+                storeMatrixWhenDifficult(ebosJac.istlMatrix(), rhs, max_it, wellModel());
             }
         }
 
