@@ -29,6 +29,8 @@
 
 #include <opm/parser/eclipse/EclipseState/Schedule/Well.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/WellTestState.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/ScheduleEnums.hpp>
+
 
 #include <opm/core/wells.h>
 #include <opm/core/well_controls.h>
@@ -172,8 +174,8 @@ namespace Opm
                                            const WellState& well_state,
                                            std::vector<double>& well_potentials) = 0;
 
-        virtual void updateWellStateWithTarget(/* const */ Simulator& ebos_simulator,
-                                               WellState& well_state) /* const */ = 0;
+        virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
+                                               WellState& well_state) const = 0;
 
         void updateWellControl(/* const */ Simulator& ebos_simulator,
                                WellState& well_state,
@@ -199,6 +201,9 @@ namespace Opm
 
         void addCellRates(RateVector& rates, int cellIdx) const;
 
+        Scalar volumetricSurfaceRateForConnection(int cellIdx, int phaseIdx) const;
+
+
         template <class EvalWell>
         Eval restrictEval(const EvalWell& in) const
         {
@@ -218,11 +223,22 @@ namespace Opm
         // Simulator is not const is because that assembleWellEq is non-const Simulator
         void wellTesting(Simulator& simulator, const std::vector<double>& B_avg,
                          const double simulation_time, const int report_step,  const bool terminal_output,
-                         const WellTestConfig::Reason testing_reason, const WellState& well_state,
-                         WellTestState& welltest_state);
+                         const WellTestConfig::Reason testing_reason,
+                         /* const */ WellState& well_state, WellTestState& welltest_state,
+                         wellhelpers::WellSwitchingLogger& logger);
 
         void updatePerforatedCell(std::vector<bool>& is_cell_perforated);
 
+        virtual void checkWellOperability(const Simulator& ebos_simulator, const WellState& well_state) = 0;
+
+        // whether the well is operable
+        bool isOperable() const;
+
+        /// Returns true if the well has one or more THP limits/constraints.
+        bool wellHasTHPConstraints() const;
+
+        /// Returns true if the well is currently in prediction mode (i.e. not history mode).
+        bool underPredictionMode() const;
 
     protected:
 
@@ -318,10 +334,6 @@ namespace Opm
         bool checkRateEconLimits(const WellEconProductionLimits& econ_production_limits,
                                  const WellState& well_state) const;
 
-        bool underPredictionMode() const;
-
-        bool wellHasTHPConstraints() const;
-
         double getTHPConstraint() const;
 
         int getTHPControlIndex() const;
@@ -350,19 +362,88 @@ namespace Opm
         // whether a well is specified with a non-zero and valid VFP table number
         bool isVFPActive() const;
 
+        struct OperabilityStatus;
+
+        OperabilityStatus operability_status_;
+
         void wellTestingEconomic(Simulator& simulator, const std::vector<double>& B_avg,
                                  const double simulation_time, const int report_step, const bool terminal_output,
-                                 const WellState& well_state, WellTestState& welltest_state);
+                                 const WellState& well_state, WellTestState& welltest_state, wellhelpers::WellSwitchingLogger& logger);
+
+        virtual void wellTestingPhysical(Simulator& simulator, const std::vector<double>& B_avg,
+                                 const double simulation_time, const int report_step, const bool terminal_output,
+                                         WellState& well_state, WellTestState& welltest_state, wellhelpers::WellSwitchingLogger& logger) = 0;
 
         void updateWellTestStateEconomic(const WellState& well_state,
                                          const double simulation_time,
                                          const bool write_message_to_opmlog,
                                          WellTestState& well_test_state) const;
 
-        void solveWellForTesting(Simulator& ebosSimulator, WellState& well_state, const std::vector<double>& B_avg, bool terminal_output);
+        void updateWellTestStatePhysical(const WellState& well_state,
+                                         const double simulation_time,
+                                         const bool write_message_to_opmlog,
+                                         WellTestState& well_test_state) const;
 
-        void scaleProductivityIndex(const int perfIdx, double& productivity_index) const;
+        void  solveWellForTesting(Simulator& ebosSimulator, WellState& well_state,
+                                  const std::vector<double>& B_avg, bool terminal_output,
+                                  wellhelpers::WellSwitchingLogger& logger);
 
+        bool solveWellEqUntilConverged(Simulator& ebosSimulator,
+                                       const std::vector<double>& B_avg,
+                                       WellState& well_state,
+                                       wellhelpers::WellSwitchingLogger& logger);
+
+        void scaleProductivityIndex(const int perfIdx, double& productivity_index);
+
+        // count the number of times an output log message is created in the productivity
+        // index calculations
+        int well_productivity_index_logger_counter_;
+
+
+    };
+
+
+
+
+    // definition of the struct OperabilityStatus
+    template<typename TypeTag>
+    struct
+    WellInterface<TypeTag>::
+    OperabilityStatus {
+        bool isOperable() const {
+            if (!operable_under_only_bhp_limit) {
+                return false;
+            } else {
+                return ( (isOperableUnderBHPLimit() || isOperableUnderTHPLimit()) );
+            }
+        }
+
+        bool isOperableUnderBHPLimit() const {
+            return operable_under_only_bhp_limit && obey_thp_limit_under_bhp_limit;
+        }
+
+        bool isOperableUnderTHPLimit() const {
+            return can_obtain_bhp_with_thp_limit && obey_bhp_limit_with_thp_limit;
+        }
+
+        void reset() {
+            operable_under_only_bhp_limit = true;
+            obey_thp_limit_under_bhp_limit = true;
+            can_obtain_bhp_with_thp_limit = true;
+            obey_bhp_limit_with_thp_limit = true;
+        }
+
+        // whether the well can be operated under bhp limit
+        // without considering other limits.
+        // if it is false, then the well is not operable for sure.
+        bool operable_under_only_bhp_limit = true;
+        // if the well can be operated under bhp limit, will it obey(not violate)
+        // the thp limit when operated under bhp limit
+        bool obey_thp_limit_under_bhp_limit = true;
+        // whether the well operate under the thp limit only
+        bool can_obtain_bhp_with_thp_limit = true;
+        // whether the well obey bhp limit when operated under thp limit
+        bool obey_bhp_limit_with_thp_limit = true;
 
     };
 

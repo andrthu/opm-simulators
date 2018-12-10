@@ -48,7 +48,6 @@
 #include <opm/autodiff/WellInterface.hpp>
 #include <opm/autodiff/StandardWell.hpp>
 #include <opm/autodiff/MultisegmentWell.hpp>
-#include <opm/autodiff/Compat.hpp>
 #include <opm/simulators/timestepping/gatherConvergenceReport.hpp>
 #include<opm/autodiff/SimFIBODetails.hpp>
 #include<dune/common/fmatrix.hh>
@@ -195,6 +194,10 @@ namespace Opm {
                                          unsigned spaceIdx,
                                          unsigned timeIdx) const;
 
+
+            using WellInterfacePtr = std::shared_ptr<WellInterface<TypeTag> >;
+            WellInterfacePtr well(const std::string& wellName) const;
+
             void initFromRestartFile(const RestartValue& restartValues);
 
             Opm::data::Wells wellData() const
@@ -236,6 +239,13 @@ namespace Opm {
             // called at the beginning of a report step
             void beginReportStep(const int time_step);
 
+            /// Return true if any well has a THP constraint.
+            bool hasTHPConstraints() const;
+
+            /// Shut down any single well, but only if it is in prediction mode.
+            /// Returns true if the well was actually found and shut.
+            bool forceShutWellByNameIfPredictionMode(const std::string& wellname, const double simulation_time);
+
         protected:
 
             void extractLegacyPressure_(std::vector<double>& cellPressure) const
@@ -271,7 +281,6 @@ namespace Opm {
 
             bool wells_active_;
 
-            using WellInterfacePtr = std::unique_ptr<WellInterface<TypeTag> >;
             // a vector of all the wells.
             std::vector<WellInterfacePtr > well_container_;
 
@@ -411,6 +420,11 @@ namespace Opm {
             void updatePerforationIntensiveQuantities();
 
             void wellTesting(const int timeStepIdx, const double simulationTime);
+
+            // convert well data from opm-common to well state from opm-core
+            void wellsToState( const data::Wells& wells,
+                               PhaseUsage phases,
+                               WellStateFullyImplicitBlackoil& state );
 
         };
 

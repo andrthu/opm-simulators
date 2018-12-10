@@ -101,7 +101,6 @@ namespace Opm {
     {
     public:
         // ---------  Types and enums  ---------
-        typedef BlackoilState ReservoirState;
         typedef WellStateFullyImplicitBlackoil WellState;
         typedef BlackoilModelParametersEbos<TypeTag> ModelParameters;
 
@@ -243,8 +242,8 @@ namespace Opm {
                 residual_norms_history_.clear();
                 current_relaxation_ = 1.0;
                 dx_old_ = 0.0;
-                convergence_reports_.push_back({});
-                convergence_reports_.back().reserve(11);
+                convergence_reports_.push_back({timer.reportStepNum(), timer.currentStepNum(), {}});
+                convergence_reports_.back().report.reserve(11);
             }
 
             report.total_linearizations = 1;
@@ -267,7 +266,7 @@ namespace Opm {
             {
                 auto convrep = getConvergence(timer, iteration,residual_norms);
                 report.converged = convrep.converged()  && iteration > nonlinear_solver.minIter();;
-                convergence_reports_.back().push_back(std::move(convrep));
+                convergence_reports_.back().report.push_back(std::move(convrep));
             }
 
              // checking whether the group targets are converged
@@ -1034,6 +1033,18 @@ namespace Opm {
         const SimulatorReport& failureReport() const
         { return failureReport_; }
 
+        struct StepReport
+        {
+            int report_step;
+            int current_step;
+            std::vector<ConvergenceReport> report;
+        };
+
+        const std::vector<StepReport>& stepReports() const
+        {
+            return convergence_reports_;
+        }
+
     protected:
         const ISTLSolverType& istlSolver() const
         {
@@ -1071,7 +1082,7 @@ namespace Opm {
         std::unique_ptr<Mat> matrix_for_preconditioner_;        
         std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
 
-        std::vector<std::vector<ConvergenceReport>> convergence_reports_;
+        std::vector<StepReport> convergence_reports_;
     public:
         /// return the StandardWells object
         BlackoilWellModel<TypeTag>&
