@@ -690,8 +690,24 @@ namespace Opm {
             well->apply(x, Ax);
         }
     }
+    
+    template<typename TypeTag>
+    void BlackoilWellModel<TypeTag>::storeWellMatrices() const
+    {
+	
+	std::ofstream DFile ("InvD.txt");
+	std::ofstream CFile ("offC.txt");
+	std::ofstream BFile ("offB.txt"); 
 
-
+	int idx = 0;
+	for (auto& well : well_container_) {
+	    well->writeWellMatrices(idx, DFile, CFile, BFile);
+	    idx++;
+        }
+	DFile.close();
+	CFile.close();
+	BFile.close();
+    }
 
 
 

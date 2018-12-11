@@ -174,7 +174,73 @@ namespace Opm
         {
             return param_.matrix_add_well_contributions_;
         }
-
+	
+	virtual void writeWellMatrices(int idx, std::ofstream& fd, std::ofstream& fc, 
+				       std::ofstream& fb) const override
+	{
+	    fd << "%%MatrixMarket matrix coordinate real general\n";
+	    fd << "% ISTL_STRUCT blocked "<< numWellEq << " " << numWellEq << "\n";
+	    fd << numWellEq << " " << numWellEq << " " << numWellEq*numWellEq << "\n";
+	    for (int eqr = 0; eqr < numWellEq; ++eqr)
+		for (int eqc = 0; eqc < numWellEq; ++eqc)
+		    fd << eqr+1<<" "<<eqc+1<<" "<< invDuneD_[0][0][eqr][eqc]<< "\n";
+	    fd << "\n";
+	    
+	    fc << "%%MatrixMarket matrix coordinate real general\n";
+	    fc << "% ISTL_STRUCT blocked "<< numWellEq << " " << numEq << "\n";
+	    int Cnnz = duneC_.nonzeroes()*numEq*numWellEq;
+	    int numRowC = duneC_.N()*numWellEq;
+	    int numColC = duneC_.M()*numEq;
+	    fc << numRowC << " " << numColC << " " << Cnnz << "\n";
+	    
+	    for (auto colC = duneC_[0].begin(); colC != duneC_[0].end(); ++colC)
+	    {
+		for (int eqr = 0; eqr < numWellEq; ++eqr)
+		{
+		    for (int eqc = 0; eqc < numEq; ++eqc)
+		    {
+			int bidx = colC.index();
+			int ridx = 1 + eqr;
+			int cidx = numEq*bidx + eqc;
+			
+			Scalar cVal = duneC_[0][bidx][eqr][eqc];
+			fc << ridx << " " << cidx << " " << cVal << "\n";
+		    }
+		}
+	    }
+	    fc << "\n";
+	    
+	    fb << "%%MatrixMarket matrix coordinate real general\n";
+	    fb << "% ISTL_STRUCT blocked "<< numWellEq << " " << numEq << "\n";
+	    int Bnnz = duneB_.nonzeroes()*numEq*numWellEq;
+	    int numRowB = duneB_.N()*numWellEq;
+	    int numColB = duneB_.M()*numEq;
+	    fb << numRowB << " " << numColB << " " << Bnnz << "\n";
+	    for (auto colB = duneB_[0].begin(); colB != duneB_[0].end(); ++colB)
+	    {
+		for (int eqr = 0; eqr < numWellEq; ++eqr)
+		{
+		    for (int eqc = 0; eqc < numEq; ++eqc)
+		    {
+			int bidx = colB.index();
+			int ridx = 1 + eqr;
+			int cidx = numEq*bidx + eqc;
+			
+			Scalar bVal = duneB_[0][bidx][eqr][eqc];
+			fb << ridx << " " << cidx << " " << bVal << "\n";
+		    }
+		}
+	    }
+	    fb << "\n";
+	    /*
+	    std::cout << "D: " << invDuneD_[0][0].N() << "X" << invDuneD_[0][0].M()
+		      << " C: " << duneC_.N() << "X" << duneC_.M() 
+		      << " B: " << duneB_.N() << "X" << duneB_.M()
+		      << " nnz: " << duneB_.nonzeroes()<< std::endl;
+	    */
+	    
+	}
+	
     protected:
 
         // protected functions from the Base class

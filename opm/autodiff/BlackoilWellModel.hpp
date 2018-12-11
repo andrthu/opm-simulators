@@ -214,6 +214,9 @@ namespace Opm {
 
             // Check if well equations is converged.
             ConvergenceReport getWellConvergence(const std::vector<Scalar>& B_avg) const;
+	    
+	    // Method for writing out well contribusions to file.
+	    void storeWellMatrices() const;
 
             // return all the wells.
             const WellCollection& wellCollection() const;

@@ -182,6 +182,12 @@ namespace Opm
                                wellhelpers::WellSwitchingLogger& logger) /* const */;
 
         virtual void updatePrimaryVariables(const WellState& well_state) const = 0;
+	
+	virtual void writeWellMatrices(int idx, std::ofstream& f, std::ofstream& f2, 
+				       std::ofstream& f3) const 
+	{
+	    std::cout << "Well write not implemented" <<std::endl;
+	}
 
         virtual void calculateExplicitQuantities(const Simulator& ebosSimulator,
                                                  const WellState& well_state) = 0; // should be const?
