@@ -697,16 +697,18 @@ namespace Opm {
 	
 	std::ofstream DFile ("InvD.txt");
 	std::ofstream CFile ("offC.txt");
-	std::ofstream BFile ("offB.txt"); 
+	std::ofstream BFile ("offB.txt");
+	std::ofstream RFile ("rhsWell.txt");
 
 	int idx = 0;
 	for (auto& well : well_container_) {
-	    well->writeWellMatrices(idx, DFile, CFile, BFile);
+	    well->writeWellMatrices(idx, DFile, CFile, BFile, RFile);
 	    idx++;
         }
 	DFile.close();
 	CFile.close();
 	BFile.close();
+	RFile.close();
     }
 
 

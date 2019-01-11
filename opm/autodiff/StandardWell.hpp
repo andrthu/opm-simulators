@@ -175,8 +175,9 @@ namespace Opm
             return param_.matrix_add_well_contributions_;
         }
 	
-	virtual void writeWellMatrices(int idx, std::ofstream& fd, std::ofstream& fc, 
-				       std::ofstream& fb) const override
+	virtual void writeWellMatrices(int idx, std::ofstream& fd, 
+				       std::ofstream& fc, std::ofstream& fb, 
+				       std::ofstream& fr) const override
 	{
 	    fd << "%%MatrixMarket matrix coordinate real general\n";
 	    fd << "% ISTL_STRUCT blocked "<< numWellEq << " " << numWellEq << "\n";
@@ -232,6 +233,16 @@ namespace Opm
 		}
 	    }
 	    fb << "\n";
+
+	    fr << "%%MatrixMarket matrix array real general\n";
+	    fr << "% ISTL_STRUCT blocked " << numWellEq << " 1\n";
+	    fr << numWellEq << " 1\n";
+	    for (int eqr = 0; eqr < numWellEq; ++eqr)
+	    {
+		fr << resWell_[0][eqr] << "\n";		    
+	    }
+	    fr << "\n";
+ 
 	    /*
 	    std::cout << "D: " << invDuneD_[0][0].N() << "X" << invDuneD_[0][0].M()
 		      << " C: " << duneC_.N() << "X" << duneC_.M() 

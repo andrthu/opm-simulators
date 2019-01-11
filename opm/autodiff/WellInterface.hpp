@@ -184,7 +184,7 @@ namespace Opm
         virtual void updatePrimaryVariables(const WellState& well_state) const = 0;
 	
 	virtual void writeWellMatrices(int idx, std::ofstream& f, std::ofstream& f2, 
-				       std::ofstream& f3) const 
+				       std::ofstream& f3, std::ofstream& f4) const 
 	{
 	    std::cout << "Well write not implemented" <<std::endl;
 	}
