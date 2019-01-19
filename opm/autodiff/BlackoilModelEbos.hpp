@@ -29,6 +29,8 @@
 
 #include <opm/simulators/timestepping/AdaptiveTimeSteppingEbos.hpp>
 
+#include <dune/istl/matrixindexset.hh>
+
 #include <opm/autodiff/NonlinearSolverEbos.hpp>
 #include <opm/autodiff/BlackoilModelParametersEbos.hpp>
 #include <opm/autodiff/BlackoilWellModel.hpp>
@@ -168,6 +170,8 @@ namespace Opm {
             global_nc_ = detail::countGlobalCells(grid_);
             //find rows of matrix corresponding to overlap
             detail::findOverlapRowsAndColumns(grid_,overlapRowAndColumns_);
+	    noGhostAdjecency_ = detail::findNoGhostAdjecency(grid_);
+
             if (!istlSolver_)
             {
                 OPM_THROW(std::logic_error,"solver down cast to ISTLSolver failed");
@@ -467,13 +471,13 @@ namespace Opm {
         {	  	  
             //value to set on diagonal
             MatrixBlockType diag_block(0.0);
-            for (int eq = 0; eq < numEq; ++eq)	    
+            for (int eq = 0; eq < numEq; ++eq)
                 diag_block[eq][eq] = 1.0e100;
 	  	  
             //loop over precalculated overlap rows and columns
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
             {
-                int lcell = row->first; 
+                int lcell = row->first;
                 //diagonal block set to large value diagonal
                 ebosJacIgnoreOverlap[lcell][lcell] = diag_block;
 
@@ -487,76 +491,19 @@ namespace Opm {
             }    	  
         }
 	
-	template<class MatForOut>
-	void writeMatrixMarketMatrixFormat(const MatForOut& Jac, std::ofstream& f) const
+	void copyJacToNoGhost(Mat& noGhost, Mat& original) const
 	{
-	    f << "%%MatrixMarket matrix coordinate real general\n";
-	    f << "% ISTL_STRUCT blocked "<< numEq << " " << numEq << "\n";
-	    f << numEq*Jac.N() << " " << numEq*Jac.M() << " " << numEq*numEq*Jac.nonzeroes() << "\n";
-	    
-	    for (auto row = Jac.begin(); row != Jac.end(); ++row) {
-		for (auto col = row->begin(); col != row->end(); ++col) {
-		    int rowI = row.index();
-		    int colI = col.index();
-		    for (int eqr = 0; eqr < numEq; ++eqr) {
-			for (int eqc = 0; eqc < numEq; ++eqc) {
-			    int rowOut = 3*rowI + eqr + 1;
-			    int colOut = 3*colI + eqc + 1;
-			    f << rowOut << " " << colOut << " " << Jac[rowI][colI][eqr][eqc] << "\n";
-			}
-		    }
-		}
-	    }
-	}
-	
-	void writeMatrixMarketVectorFormat(BVector& rhs, std::ofstream& f) const
-	{
-	    f << "%%MatrixMarket matrix array real general\n";
-	    f << "% ISTL_STRUCT blocked "<< numEq << " 1\n";
-	    f << rhs.size()*numEq << " " << 1 <<  "\n";
-	    
-	    for (size_t el = 0; el < rhs.size(); ++el)
+	    for (auto row = noGhost.begin(); row != noGhost.end(); ++row)
 	    {
-		for (int eq = 0; eq < numEq; ++eq)
-		    f << rhs[el][eq] << "\n";
+		int rid = row.index();
+		for (auto col = row->begin(); col != row->end(); ++col)
+		{
+		    int cid = col.index();
+		    noGhost[rid][cid] = original[rid][cid];
+		}
 	    }
 	}
-	
-	template<class MatForOut>
-	void storeMatrixWhenDifficult(const MatForOut& Jac, BVector& rhs, int max_it) const
-        {
-            int it = linearIterationsLastSolve();
-	    
-            if (it > max_it)  
-            {
-                std::ofstream MatFile ("BlackoilMatrix.mtx");
-                std::ofstream VecFile ("BlackoilRHS.vec");
-		writeMatrixMarketMatrixFormat(Jac, MatFile);
-		writeMatrixMarketVectorFormat(rhs, VecFile);
-                //Dune::writeMatrixMarket(Jac,MatFile);
-                //Dune::writeMatrixMarket(rhs,VecFile);
-                MatFile.close();
-                VecFile.close();   
-                
-                std:: ofstream infoFile;
-                infoFile.open("MatrixInfo.txt", std::ofstream::app);
-                infoFile << "EpisodeIndex: " << ebosSimulator_.episodeIndex() << " Current time: " << ebosSimulator_.time() << " Number of iterations: " << it << "\n";
-                infoFile.close();
-		
-		wellModel().storeWellMatrices();
-		/*
-		for (auto n = nodes.begin() ; n!= nodes.end(); ++n)
-		{
-		    std::cout << n->name() << std::endl;
-		}
-		*/
-		//int wellNum = 0;
-		//for (auto& well : well_col ) {
-		//std::cout << "Well num: "<< wellNum << std::cout;
-            }
-        }
-	
-	
+
         /// Solve the Jacobian system Jx = r where J is the Jacobian and
         /// r is the residual.
         void solveJacobianSystem(BVector& x) const
@@ -585,12 +532,15 @@ namespace Opm {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, true > Operator;
 
                 auto ebosJacIgnoreOverlap = Mat(ebosJac.istlMatrix());
+		Mat ebosJacNoGhostRows;
+		noGhostAdjecency_.exportIdx(ebosJacNoGhostRows);
                 //remove ghost rows in local matrix
                 makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
+		copyJacToNoGhost(ebosJacNoGhostRows, ebosJacIgnoreOverlap);
 
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
-                Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel(),
+                Operator opA(ebosJacNoGhostRows, ebosJacNoGhostRows, wellModel(),
                              istlSolver().parallelInformation() );
                 assert( opA.comm() );
                 istlSolver().solve( opA, x, ebosResid, *(opA.comm()) );
@@ -599,11 +549,9 @@ namespace Opm {
             {
                 typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
                 Operator opA(ebosJac.istlMatrix(), actual_mat_for_prec, wellModel());
-                
-                int max_it = istlSolver().max_iterations();
+
                 BVector rhs = BVector(ebosResid);
                 istlSolver().solve( opA, x, ebosResid );
-                storeMatrixWhenDifficult(ebosJac.istlMatrix(), rhs, max_it);//, wellModel());
             }
         }
 
@@ -1086,6 +1034,7 @@ namespace Opm {
 
         std::unique_ptr<Mat> matrix_for_preconditioner_;        
         std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
+	Dune::MatrixIndexSet noGhostAdjecency_;
 
         std::vector<StepReport> convergence_reports_;
     public:

@@ -242,10 +242,57 @@ namespace detail {
                         }
                         //add row to list
                         overlapRowAndColumns.push_back(std::pair<int,std::vector<int>>(lcell,columns));	
-                    }    
+                    }
                 }	      
             }
-        }				       
+        }
+
+	/// \brief Adjecency pattern of matrix without off-diagonals on ghost rows.
+	template<class Grid>
+	Dune::MatrixIndexSet findNoGhostAdjecency(const Grid& grid)
+	{
+	    Dune::MatrixIndexSet op;
+
+	    if ( grid.comm().size() > 1) 
+            {
+		int N = grid.numCells();
+		op.resize(N, N);
+
+		auto lid = grid.localIdSet();
+
+		const auto& gridView = grid.leafGridView();
+		auto elemIt = gridView.template begin<0>();
+		const auto& elemEndIt = gridView.template end<0>();
+
+		//loop over cells in mesh
+                for (; elemIt != elemEndIt; ++elemIt) 
+                {		
+                    const auto& elem = *elemIt;
+
+		    //local id of overlap cell
+		    int lcell = lid.id(elem);
+		    
+		    op.add(lcell, lcell);
+                    
+                    if (elem.partitionType() == Dune::InteriorEntity)
+                    {
+                        //loop over faces of cell
+                        auto isend = gridView.iend(elem);
+                        for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
+                        {
+                            //check if face has neighbor
+                            if (is->neighbor())
+                            {
+                                //get index of neighbor cell
+                                int ncell = lid.id(is->outside());			    
+                                op.add(lcell, ncell);
+                            }		
+                        }
+                    }
+		}
+	    }
+	    return op;
+	}
     } // namespace detail
 } // namespace Opm
 
