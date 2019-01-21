@@ -114,8 +114,6 @@ namespace Opm
     {
         Base::init(phase_usage_arg, depth_arg, gravity_arg, num_cells);
 
-        connectionRates_.resize(number_of_perforations_);
-
         // TODO: for StandardWell, we need to update the perf depth here using depth_arg.
         // for MultisegmentWell, it is much more complicated.
         // It can be specified directly, it can be calculated from the segment depth,
@@ -254,7 +252,8 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    updateWellStateWithTarget(WellState& well_state) const
+    updateWellStateWithTarget(const Simulator& ebos_simulator,
+                              WellState& well_state) const
     {
         // Updating well state bas on well control
         // Target values are used as initial conditions for BHP, THP, and SURFACE_RATE
@@ -373,8 +372,6 @@ namespace Opm
 
             break;
         } // end of switch
-
-        updatePrimaryVariables(well_state);
     }
 
 
@@ -561,9 +558,17 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     computeWellPotentials(const Simulator& /* ebosSimulator */,
                           const WellState& /* well_state */,
-                          std::vector<double>& /* well_potentials */)
+                          std::vector<double>& well_potentials)
     {
-        OPM_THROW(std::runtime_error, "well potential calculation for multisegment wells is not supported yet");
+        const std::string msg = std::string("Well potential calculation is not supported for multisegment wells \n")
+                + "A well potential of zero is returned for output purposes. \n"
+                + "If you need well potential to set the guide rate for group controled wells \n"
+                + "you will have to change the " + name() + " well to a standard well \n";
+
+        OpmLog::warning("WELL_POTENTIAL_NOT_IMPLEMENTED_FOR_MULTISEG_WELLS", msg);
+
+        const int np = number_of_phases_;
+        well_potentials.resize(np, 0.0);
     }
 
 
@@ -1640,6 +1645,21 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
+    checkWellOperability(const Simulator& /* ebos_simulator */,
+                         const WellState& /* well_state */)
+    {
+        const std::string msg = "Support of well operability checking for multisegment wells is not implemented "
+                                "yet, checkWellOperability() for " + name() + " will do nothing";
+        OpmLog::warning("NO_OPERATABILITY_CHECKING_MS_WELLS", msg);
+    }
+
+
+
+
+
+    template <typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
     updateWellStateFromPrimaryVariables(WellState& well_state) const
     {
         const PhaseUsage& pu = phaseUsage();
@@ -1866,6 +1886,33 @@ namespace Opm
                 assemblePressureEq(seg);
             }
         }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    wellTestingPhysical(Simulator& simulator, const std::vector<double>& B_avg,
+                        const double simulation_time, const int report_step, const bool terminal_output,
+                        WellState& well_state, WellTestState& welltest_state, wellhelpers::WellSwitchingLogger& logger)
+    {
+        const std::string msg = "Support of well testing for physical limits for multisegment wells is not "
+                                "implemented yet, wellTestingPhysical() for " + name() + " will do nothing";
+        OpmLog::warning("NO_WELLTESTPHYSICAL_CHECKING_MS_WELLS", msg);
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    updateWaterThroughput(const double dt OPM_UNUSED, WellState& well_state OPM_UNUSED) const
+    {
     }
 
 }

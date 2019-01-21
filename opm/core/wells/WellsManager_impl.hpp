@@ -116,8 +116,7 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
                                         const double* permeability,
                                         const NTG& ntg,
                                         std::vector<int>& wells_on_proc,
-                                        const std::unordered_set<std::string>& ignored_wells,
-                                        const DynamicListEconLimited& list_econ_limited)
+                                        const std::unordered_set<std::string>& ignored_wells)
 {
     if (dimensions != 3) {
         OPM_THROW(std::domain_error,
@@ -146,47 +145,27 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
             continue;
         }
 
-        if (list_econ_limited.wellShutEconLimited(well->name())) {
-            continue;
-        }
-
-        std::vector<int> cells_connection_closed;
-        if (list_econ_limited.anyConnectionClosedForWell(well->name())) {
-            cells_connection_closed = list_econ_limited.getClosedConnectionsForWell(well->name());
-        }
-
         {   // COMPDAT handling
             // shut completions and open ones stored in this process will have 1 others 0.
 
             for(const auto& completion : well->getConnections(timeStep)) {
                 if (completion.state() == WellCompletion::OPEN) {
-                    int i = completion.getI();
-                    int j = completion.getJ();
-                    int k = completion.getK();
+                    const int i = completion.getI();
+                    const int j = completion.getJ();
+                    const int k = completion.getK();
 
                     const int* cpgdim = cart_dims;
-                    int cart_grid_indx = i + cpgdim[0]*(j + cpgdim[1]*k);
-                    std::map<int, int>::const_iterator cgit = cartesian_to_compressed.find(cart_grid_indx);
+                    const int cart_grid_indx = i + cpgdim[0]*(j + cpgdim[1]*k);
+                    const std::map<int, int>::const_iterator cgit = cartesian_to_compressed.find(cart_grid_indx);
                     if (cgit == cartesian_to_compressed.end()) {
-                        OPM_MESSAGE("****Warning: Cell with i,j,k indices " << i << ' ' << j << ' '
-                                    << k << " not found in grid. The completion will be igored (well = "
-                                    << well->name() << ')');
+                        const std::string msg = ("Cell with i,j,k indices " + std::to_string(i) + " " + std::to_string(j)
+                                    + " " + std::to_string(k)  +  " not found in grid (well = " +  well->name() + ").");
+                        OPM_THROW(std::runtime_error, msg);
                     }
                     else
                     {
-                        int cell = cgit->second;
-                        // check if the connection is closed due to economic limits
-                        if (!cells_connection_closed.empty()) {
-                            const bool connection_found = std::find(cells_connection_closed.begin(),
-                                                                    cells_connection_closed.end(), cell)
-                                                          != cells_connection_closed.end();
-                            if (connection_found) {
-                                continue;
-                            }
-                        }
-
                         PerfData pd;
-                        pd.cell = cell;
+                        pd.cell = cgit->second;
                         pd.well_index = completion.CF() * completion.wellPi();
                         pd.satnumid = completion.satTableId();
 
@@ -198,6 +177,15 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
                     }
                 }
             }
+        }
+
+        if (wellperf_data[active_well_index].empty()) {
+            const std::string msg = " there is no perforations associated with the well "
+                                  + well->name() + ", the well is ignored for the report step "
+                                  + std::to_string(timeStep);
+            OpmLog::warning(msg);
+            wells_on_proc[wellIter - wells.begin()] = 0;
+            continue;
         }
         {   // WELSPECS handling
             well_names_to_index[well->name()] = active_well_index;
@@ -286,14 +274,13 @@ WellsManager(const Opm::EclipseState& eclipseState,
              int                             dimensions,
              const C2F&                      cell_to_faces,
              FC                              begin_face_centroids,
-             const DynamicListEconLimited&   list_econ_limited,
              bool                            is_parallel_run,
              const std::unordered_set<std::string>&    deactivated_wells)
     : w_(create_wells(0,0,0)), is_parallel_run_(is_parallel_run)
 {
   init(eclipseState, schedule, timeStep, number_of_cells, global_cell,
          cart_dims, dimensions,
-         cell_to_faces, begin_face_centroids, list_econ_limited, deactivated_wells);
+         cell_to_faces, begin_face_centroids, deactivated_wells);
 }
 
 /// Construct wells from deck.
@@ -308,7 +295,6 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
                    int                             dimensions,
                    const C2F&                      cell_to_faces,
                    FC                              begin_face_centroids,
-                   const DynamicListEconLimited&   list_econ_limited,
                    const std::unordered_set<std::string>&    deactivated_wells)
 {
     if (dimensions != 3) {
@@ -379,9 +365,9 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
                          dz,
                          well_names, well_data, well_names_to_index,
                          pu, cartesian_to_compressed, interleavedPerm.data(), ntg,
-                         wells_on_proc, deactivated_wells, list_econ_limited);
+                         wells_on_proc, deactivated_wells);
 
-    setupWellControls(wells, timeStep, well_names, pu, wells_on_proc, list_econ_limited);
+    setupWellControls(wells, timeStep, well_names, pu, wells_on_proc);
 
     {
         const auto& fieldGroup = schedule.getGroup( "FIELD" );

@@ -27,7 +27,6 @@
 #include <opm/autodiff/BlackoilModelEbos.hpp>
 #include <opm/autodiff/BlackoilModelParametersEbos.hpp>
 #include <opm/autodiff/WellStateFullyImplicitBlackoil.hpp>
-#include <opm/autodiff/BlackoilWellModel.hpp>
 #include <opm/autodiff/BlackoilAquiferModel.hpp>
 #include <opm/autodiff/moduleVersion.hpp>
 #include <opm/simulators/timestepping/AdaptiveTimeSteppingEbos.hpp>
@@ -70,7 +69,6 @@ public:
     typedef Ewoms::BlackOilPolymerModule<TypeTag> PolymerModule;
 
     typedef WellStateFullyImplicitBlackoil WellState;
-    typedef BlackoilState ReservoirState;
     typedef BlackoilModelEbos<TypeTag> Model;
     typedef NonlinearSolverEbos<TypeTag, Model> Solver;
     typedef typename Model::ModelParameters ModelParameters;
@@ -100,10 +98,8 @@ public:
     /// \param[in] eclipse_state the object which represents an internalized ECL deck
     /// \param[in] output_writer
     /// \param[in] threshold_pressures_by_face   if nonempty, threshold pressures that inhibit flow
-    SimulatorFullyImplicitBlackoilEbos(Simulator& ebosSimulator,
-                                       NewtonIterationBlackoilInterface& linearSolver)
+    SimulatorFullyImplicitBlackoilEbos(Simulator& ebosSimulator)
         : ebosSimulator_(ebosSimulator)
-        , linearSolver_(linearSolver)
     {
         phaseUsage_ = phaseUsageFromDeck(eclState());
 
@@ -328,7 +324,6 @@ protected:
         auto model = std::unique_ptr<Model>(new Model(ebosSimulator_,
                                                       modelParam_,
                                                       wellModel,
-                                                      linearSolver_,
                                                       terminalOutput_));
 
         return std::unique_ptr<Solver>(new Solver(solverParam_, std::move(model)));
@@ -376,7 +371,6 @@ protected:
     SolverParameters solverParam_;
 
     // Observed objects.
-    NewtonIterationBlackoilInterface& linearSolver_;
     PhaseUsage phaseUsage_;
     // Misc. data
     bool terminalOutput_;

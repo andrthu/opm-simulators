@@ -36,6 +36,8 @@ namespace Opm
     , primary_variables_(numWellEq, 0.0)
     , primary_variables_evaluation_(numWellEq) // the number of the primary variables
     , F0_(numWellConservationEq)
+    , ipr_a_(number_of_phases_)
+    , ipr_b_(number_of_phases_)
     {
         assert(num_components_ == numWellConservationEq);
 
@@ -57,8 +59,6 @@ namespace Opm
          const int num_cells)
     {
         Base::init(phase_usage_arg, depth_arg, gravity_arg, num_cells);
-
-        connectionRates_.resize(number_of_perforations_);
 
         perf_depth_.resize(number_of_perforations_, 0.);
         for (int perf = 0; perf < number_of_perforations_; ++perf) {
@@ -279,15 +279,14 @@ namespace Opm
     void
     StandardWell<TypeTag>::
     computePerfRate(const IntensiveQuantities& intQuants,
-                    const std::vector<EvalWell>& mob_perfcells_dense,
-                    const double Tw, const EvalWell& bhp, const double& cdp,
-                    const bool& allow_cf, std::vector<EvalWell>& cq_s,
-                    double& perf_dis_gas_rate, double& perf_vap_oil_rate) const
+                    const std::vector<EvalWell>& mob,
+                    const EvalWell& bhp,
+                    const int perf,
+                    const bool allow_cf,
+                    std::vector<EvalWell>& cq_s,
+                    double& perf_dis_gas_rate,
+                    double& perf_vap_oil_rate) const
     {
-        std::vector<EvalWell> cmix_s(num_components_,0.0);
-        for (int componentIdx = 0; componentIdx < num_components_; ++componentIdx) {
-            cmix_s[componentIdx] = wellSurfaceVolumeFraction(componentIdx);
-        }
         const auto& fs = intQuants.fluidState();
         const EvalWell pressure = extendEval(fs.pressure(FluidSystem::oilPhaseIdx));
         const EvalWell rs = extendEval(fs.Rs());
@@ -306,7 +305,7 @@ namespace Opm
         }
 
         // Pressure drawdown (also used to determine direction of flow)
-        const EvalWell well_pressure = bhp + cdp;
+        const EvalWell well_pressure = bhp + perf_pressure_diffs_[perf];
         const EvalWell drawdown = pressure - well_pressure;
 
         // producing perforations
@@ -316,9 +315,10 @@ namespace Opm
                 return;
             }
 
+            const double Tw = well_index_[perf];
             // compute component volumetric rates at standard conditions
             for (int componentIdx = 0; componentIdx < num_components_; ++componentIdx) {
-                const EvalWell cq_p = - Tw * (mob_perfcells_dense[componentIdx] * drawdown);
+                const EvalWell cq_p = - Tw * (mob[componentIdx] * drawdown);
                 cq_s[componentIdx] = b_perfcells_dense[componentIdx] * cq_p;
             }
 
@@ -347,13 +347,20 @@ namespace Opm
             }
 
             // Using total mobilities
-            EvalWell total_mob_dense = mob_perfcells_dense[0];
+            EvalWell total_mob_dense = mob[0];
             for (int componentIdx = 1; componentIdx < num_components_; ++componentIdx) {
-                total_mob_dense += mob_perfcells_dense[componentIdx];
+                total_mob_dense += mob[componentIdx];
             }
 
             // injection perforations total volume rates
+            const double Tw = well_index_[perf];
             const EvalWell cqt_i = - Tw * (total_mob_dense * drawdown);
+
+            // surface volume fraction of fluids within wellbore
+            std::vector<EvalWell> cmix_s(num_components_, 0.);
+            for (int componentIdx = 0; componentIdx < num_components_; ++componentIdx) {
+                cmix_s[componentIdx] = wellSurfaceVolumeFraction(componentIdx);
+            }
 
             // compute volume ratio between connection at standard conditions
             EvalWell volumeRatio = 0.0;
@@ -439,7 +446,10 @@ namespace Opm
                    const double dt,
                    WellState& well_state)
     {
-        const int np = number_of_phases_;
+
+        checkWellOperability(ebosSimulator, well_state);
+
+        if (!this->isOperable()) return;
 
         // clear all entries
         duneB_ = 0.0;
@@ -450,7 +460,7 @@ namespace Opm
         // TODO: it probably can be static member for StandardWell
         const double volume = 0.002831684659200; // 0.1 cu ft;
 
-        const bool allow_cf = crossFlowAllowed(ebosSimulator);
+        const bool allow_cf = getAllowCrossFlow() || openCrossFlowAvoidSingularity(ebosSimulator);
 
         const EvalWell& bhp = getBhp();
 
@@ -458,6 +468,7 @@ namespace Opm
         well_state.wellVaporizedOilRates()[index_of_well_] = 0.;
         well_state.wellDissolvedGasRates()[index_of_well_] = 0.;
 
+        const int np = number_of_phases_;
         for (int p = 0; p < np; ++p) {
             well_state.productivityIndex()[np*index_of_well_ + p] = 0.;
         }
@@ -466,12 +477,13 @@ namespace Opm
 
             const int cell_idx = well_cells_[perf];
             const auto& intQuants = *(ebosSimulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/ 0));
-            std::vector<EvalWell> cq_s(num_components_,0.0);
             std::vector<EvalWell> mob(num_components_, 0.0);
             getMobility(ebosSimulator, perf, mob);
+
+            std::vector<EvalWell> cq_s(num_components_, 0.0);
             double perf_dis_gas_rate = 0.;
             double perf_vap_oil_rate = 0.;
-            computePerfRate(intQuants, mob, well_index_[perf], bhp, perf_pressure_diffs_[perf], allow_cf,
+            computePerfRate(intQuants, mob, bhp, perf, allow_cf,
                             cq_s, perf_dis_gas_rate, perf_vap_oil_rate);
 
             // updating the solution gas rate and solution oil rate
@@ -579,18 +591,39 @@ namespace Opm
                     cq_s_poly *= extendEval(intQuants.polymerConcentration() * intQuants.polymerViscosityCorrection());
                 }
                 connectionRates_[perf][contiPolymerEqIdx] = Base::restrictEval(cq_s_poly);
+
+                if (this->has_polymermw) {
+                    if (well_type_ == PRODUCER) {
+                        EvalWell cq_s_polymw = cq_s_poly;
+                        if (cq_s_polymw < 0.) {
+                            cq_s_polymw *= extendEval(intQuants.polymerMoleWeight() );
+                        } else {
+                            // we do not consider the molecular weight from the polymer
+                            // re-injecting back through producer
+                            cq_s_polymw *= 0.;
+                        }
+                        connectionRates_[perf][this->contiPolymerMWEqIdx] = Base::restrictEval(cq_s_polymw);
+                    }
+                }
             }
 
             // Store the perforation pressure for later usage.
             well_state.perfPress()[first_perf_ + perf] = well_state.bhp()[index_of_well_] + perf_pressure_diffs_[perf];
 
-            // Compute Productivity index
+            // Compute Productivity index if asked for
+            const auto& pu = phaseUsage();
+            const Opm::SummaryConfig& summaryConfig = ebosSimulator.vanguard().summaryConfig();
             for (int p = 0; p < np; ++p) {
-                const unsigned int compIdx = flowPhaseToEbosCompIdx(p);
-                const double drawdown = well_state.perfPress()[first_perf_ + perf] - intQuants.fluidState().pressure(FluidSystem::oilPhaseIdx).value();
-                double productivity_index = cq_s[compIdx].value() / drawdown;
-                scaleProductivityIndex(perf, productivity_index);
-                well_state.productivityIndex()[np*index_of_well_ + p] += productivity_index;
+                if ( (pu.phase_pos[Water] == p && (summaryConfig.hasSummaryKey("WPIW:" + name()) || summaryConfig.hasSummaryKey("WPIL:" + name())))
+                        || (pu.phase_pos[Oil] == p && (summaryConfig.hasSummaryKey("WPIO:" + name()) || summaryConfig.hasSummaryKey("WPIL:" + name())))
+                        || (pu.phase_pos[Gas] == p && summaryConfig.hasSummaryKey("WPIG:" + name()))) {
+
+                    const unsigned int compIdx = flowPhaseToEbosCompIdx(p);
+                    const double drawdown = well_state.perfPress()[first_perf_ + perf] - intQuants.fluidState().pressure(FluidSystem::oilPhaseIdx).value();
+                    double productivity_index = cq_s[compIdx].value() / drawdown;
+                    scaleProductivityIndex(perf, productivity_index);
+                    well_state.productivityIndex()[np*index_of_well_ + p] += productivity_index;
+                }
             }
 
         }
@@ -739,45 +772,6 @@ namespace Opm
 
 
     template<typename TypeTag>
-    bool
-    StandardWell<TypeTag>::
-    crossFlowAllowed(const Simulator& ebosSimulator) const
-    {
-        if (getAllowCrossFlow()) {
-            return true;
-        }
-
-        // TODO: investigate the justification of the following situation
-
-        // check for special case where all perforations have cross flow
-        // then the wells must allow for cross flow
-        for (int perf = 0; perf < number_of_perforations_; ++perf) {
-            const int cell_idx = well_cells_[perf];
-            const auto& intQuants = *(ebosSimulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/0));
-            const auto& fs = intQuants.fluidState();
-            const EvalWell pressure = extendEval(fs.pressure(FluidSystem::oilPhaseIdx));
-            const EvalWell& bhp = getBhp();
-
-            // Pressure drawdown (also used to determine direction of flow)
-            const EvalWell well_pressure = bhp + perf_pressure_diffs_[perf];
-            const EvalWell drawdown = pressure - well_pressure;
-
-            if (drawdown.value() < 0 && well_type_ == INJECTOR)  {
-                return false;
-            }
-
-            if (drawdown.value() > 0 && well_type_ == PRODUCER)  {
-                return false;
-            }
-        }
-        return true;
-    }
-
-
-
-
-
-    template<typename TypeTag>
     void
     StandardWell<TypeTag>::
     getMobility(const Simulator& ebosSimulator,
@@ -851,6 +845,8 @@ namespace Opm
     updateWellState(const BVectorWell& dwells,
                     WellState& well_state) const
     {
+        if (!this->isOperable()) return;
+
         updatePrimaryVariablesNewton(dwells, well_state);
 
         updateWellStateFromPrimaryVariables(well_state);
@@ -870,29 +866,37 @@ namespace Opm
 
         const std::vector<double> old_primary_variables = primary_variables_;
 
+        // for injectors, very typical one of the fractions will be one, and it is easy to get zero value
+        // fractions. not sure what is the best way to handle it yet, so we just use 1.0 here
+        const double relaxation_factor_fractions = (well_type_ == PRODUCER) ?
+                                         relaxationFactorFractionsProducer(old_primary_variables, dwells)
+                                       : 1.0;
+
         // update the second and third well variable (The flux fractions)
         if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
             const int sign2 = dwells[0][WFrac] > 0 ? 1: -1;
-            const double dx2_limited = sign2 * std::min(std::abs(dwells[0][WFrac]),dFLimit);
+            const double dx2_limited = sign2 * std::min(std::abs(dwells[0][WFrac] * relaxation_factor_fractions), dFLimit);
+            // primary_variables_[WFrac] = old_primary_variables[WFrac] - dx2_limited;
             primary_variables_[WFrac] = old_primary_variables[WFrac] - dx2_limited;
         }
 
         if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
             const int sign3 = dwells[0][GFrac] > 0 ? 1: -1;
-            const double dx3_limited = sign3 * std::min(std::abs(dwells[0][GFrac]),dFLimit);
+            const double dx3_limited = sign3 * std::min(std::abs(dwells[0][GFrac] * relaxation_factor_fractions), dFLimit);
             primary_variables_[GFrac] = old_primary_variables[GFrac] - dx3_limited;
         }
 
         if (has_solvent) {
             const int sign4 = dwells[0][SFrac] > 0 ? 1: -1;
-            const double dx4_limited = sign4 * std::min(std::abs(dwells[0][SFrac]),dFLimit);
+            const double dx4_limited = sign4 * std::min(std::abs(dwells[0][SFrac]) * relaxation_factor_fractions, dFLimit);
             primary_variables_[SFrac] = old_primary_variables[SFrac] - dx4_limited;
         }
 
         processFractions();
 
-        // updating the total rates G_t
-        primary_variables_[WQTotal] = old_primary_variables[WQTotal] - dwells[0][WQTotal];
+        // updating the total rates Q_t
+        const double relaxation_factor_rate = relaxationFactorRate(old_primary_variables, dwells);
+        primary_variables_[WQTotal] = old_primary_variables[WQTotal] - dwells[0][WQTotal] * relaxation_factor_rate;
 
         // updating the bottom hole pressure
         {
@@ -1067,43 +1071,35 @@ namespace Opm
     StandardWell<TypeTag>::
     updateThp(WellState& well_state) const
     {
-        // for the wells having a THP constaint, we should update their thp value
-        // If it is under THP control, it will be set to be the target value.
-        // TODO: a better standard is probably whether we have the table to calculate the THP value
-        // TODO: it is something we need to check the output to decide.
-        const WellControls* wc = well_controls_;
-        // TODO: we should only maintain one current control either from the well_state or from well_controls struct.
-        // Either one can be more favored depending on the final strategy for the initilzation of the well control
-        const int nwc = well_controls_get_num(wc);
-        // Looping over all controls until we find a THP constraint
-        for (int ctrl_index = 0; ctrl_index < nwc; ++ctrl_index) {
-            if (well_controls_iget_type(wc, ctrl_index) == THP) {
-                // the current control
-                const int current = well_state.currentControls()[index_of_well_];
-                // if well under THP control at the moment
-                if (current == ctrl_index) {
-                    const double thp_target = well_controls_iget_target(wc, current);
-                    well_state.thp()[index_of_well_] = thp_target;
-                } else { // otherwise we calculate the thp from the bhp value
-                    const Opm::PhaseUsage& pu = phaseUsage();
-                    std::vector<double> rates(3, 0.0);
+        // When there is no vaild VFP table provided, we set the thp to be zero.
+        if (!this->isVFPActive()) {
+            well_state.thp()[index_of_well_] = 0.;
+            return;
+        }
 
-                    if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
-                        rates[ Water ] = well_state.wellRates()[index_of_well_ * number_of_phases_ + pu.phase_pos[ Water ] ];
-                    }
-                    if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx)) {
-                        rates[ Oil ] = well_state.wellRates()[index_of_well_ * number_of_phases_ + pu.phase_pos[ Oil ] ];
-                    }
-                    if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
-                        rates[ Gas ] = well_state.wellRates()[index_of_well_ * number_of_phases_ + pu.phase_pos[ Gas ] ];
-                    }
+        // avaiable VFP table is provided, we should update the thp value
 
-                    const double bhp = well_state.bhp()[index_of_well_];
+        // if the well is under THP control, we should use its target value
+        if (well_controls_get_current_type(well_controls_) == THP) {
+            well_state.thp()[index_of_well_] = well_controls_get_current_target(well_controls_);
+        } else {
+            // the well is under other control types, we calculate the thp based on bhp and rates
+            std::vector<double> rates(3, 0.0);
 
-                    well_state.thp()[index_of_well_] = calculateThpFromBhp(rates, ctrl_index, bhp);
-                }
-                break;
+            const Opm::PhaseUsage& pu = phaseUsage();
+            if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
+                rates[ Water ] = well_state.wellRates()[index_of_well_ * number_of_phases_ + pu.phase_pos[ Water ] ];
             }
+            if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx)) {
+                rates[ Oil ] = well_state.wellRates()[index_of_well_ * number_of_phases_ + pu.phase_pos[ Oil ] ];
+            }
+            if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                rates[ Gas ] = well_state.wellRates()[index_of_well_ * number_of_phases_ + pu.phase_pos[ Gas ] ];
+            }
+
+            const double bhp = well_state.bhp()[index_of_well_];
+
+            well_state.thp()[index_of_well_] = calculateThpFromBhp(rates, bhp);
         }
     }
 
@@ -1114,7 +1110,8 @@ namespace Opm
     template<typename TypeTag>
     void
     StandardWell<TypeTag>::
-    updateWellStateWithTarget(WellState& well_state) const
+    updateWellStateWithTarget(const Simulator& ebos_simulator,
+                              WellState& well_state) const
     {
         // number of phases
         const int np = number_of_phases_;
@@ -1131,32 +1128,29 @@ namespace Opm
             // TODO: similar to the way below to handle THP
             // we should not something related to thp here when there is thp constraint
             // or when can calculate the THP (table avaiable or requested for output?)
+            // TODO: we should address this in a function updateWellStateWithBHPTarget.
+            // TODO: however, the reason that this one minght not be that critical with
+            // TODO: the effects remaining to be investigated.
             break;
 
         case THP: {
-            // TODO: this will be the big task here.
-            // p_bhp = BHP(THP, rates(p_bhp))
-            // more sophiscated techniques is required to obtain the bhp and rates here
-            well_state.thp()[well_index] = target;
+            // when a well can not work under THP target, it switches to BHP control
+            if (this->operability_status_.isOperableUnderTHPLimit() ) {
+                updateWellStateWithTHPTargetIPR(ebos_simulator, well_state);
+            } else { // go to BHP limit
+                assert(this->operability_status_.isOperableUnderBHPLimit() );
 
-            const Opm::PhaseUsage& pu = phaseUsage();
-            std::vector<double> rates(3, 0.0);
-            if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
-                rates[ Water ] = well_state.wellRates()[well_index*np + pu.phase_pos[ Water ] ];
-            }
-            if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx)) {
-                 rates[ Oil ] = well_state.wellRates()[well_index*np + pu.phase_pos[ Oil ] ];
-            }
-            if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
-                rates[ Gas ] = well_state.wellRates()[well_index*np + pu.phase_pos[ Gas ] ];
-            }
+                OpmLog::info("well " + name() + " can not work with THP target, switching to BHP control");
 
-            well_state.bhp()[well_index] = calculateBhpFromThp(rates, current);
+                well_state.bhp()[well_index] = mostStrictBhpFromBhpLimits();
+            }
             break;
         }
 
         case RESERVOIR_RATE: // intentional fall-through
         case SURFACE_RATE:
+            // TODO: something needs to be done with BHP and THP here
+            // TODO: they should go to a separate function
             // checking the number of the phases under control
             int numPhasesWithTargetsUnderThisControl = 0;
             for (int phase = 0; phase < np; ++phase) {
@@ -1214,8 +1208,421 @@ namespace Opm
 
             break;
         } // end of switch
+    }
 
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    updateIPR(const Simulator& ebos_simulator) const
+    {
+        // TODO: not handling solvent related here for now
+
+        // TODO: it only handles the producers for now
+        // the formular for the injectors are not formulated yet
+        if (well_type_ == INJECTOR) {
+            return;
+        }
+
+        // initialize all the values to be zero to begin with
+        std::fill(ipr_a_.begin(), ipr_a_.end(), 0.);
+        std::fill(ipr_b_.begin(), ipr_b_.end(), 0.);
+
+        for (int perf = 0; perf < number_of_perforations_; ++perf) {
+            std::vector<EvalWell> mob(num_components_, 0.0);
+            // TODO: mabye we should store the mobility somewhere, so that we only need to calculate it one per iteration
+            getMobility(ebos_simulator, perf, mob);
+
+            const int cell_idx = well_cells_[perf];
+            const auto& int_quantities = *(ebos_simulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/ 0));
+            const auto& fs = int_quantities.fluidState();
+            // the pressure of the reservoir grid block the well connection is in
+            const double p_r = fs.pressure(FluidSystem::oilPhaseIdx).value();
+
+            // calculating the b for the connection
+            std::vector<double> b_perf(num_components_);
+            for (size_t phase = 0; phase < FluidSystem::numPhases; ++phase) {
+                if (!FluidSystem::phaseIsActive(phase)) {
+                    continue;
+                }
+                const unsigned comp_idx = Indices::canonicalToActiveComponentIndex(FluidSystem::solventComponentIndex(phase));
+                b_perf[comp_idx] = fs.invB(phase).value();
+            }
+
+            // the pressure difference between the connection and BHP
+            const double h_perf = perf_pressure_diffs_[perf];
+            const double pressure_diff = p_r - h_perf;
+
+            // Let us add a check, since the pressure is calculated based on zero value BHP
+            // it should not be negative anyway. If it is negative, we might need to re-formulate
+            // to taking into consideration the crossflow here.
+            if (pressure_diff <= 0.) {
+                OpmLog::warning("NON_POSITIVE_DRAWDOWN_IPR",
+                                "non-positive drawdown found when updateIPR for well " + name());
+            }
+
+            // the well index associated with the connection
+            const double tw_perf = well_index_[perf];
+
+            // TODO: there might be some indices related problems here
+            // phases vs components
+            // ipr values for the perforation
+            std::vector<double> ipr_a_perf(ipr_a_.size());
+            std::vector<double> ipr_b_perf(ipr_b_.size());
+            for (int p = 0; p < number_of_phases_; ++p) {
+                const double tw_mob = tw_perf * mob[p].value() * b_perf[p];
+                ipr_a_perf[p] += tw_mob * pressure_diff;
+                ipr_b_perf[p] += tw_mob;
+            }
+
+            // we need to handle the rs and rv when both oil and gas are present
+            if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx) && FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                const unsigned oil_comp_idx = Indices::canonicalToActiveComponentIndex(FluidSystem::oilCompIdx);
+                const unsigned gas_comp_idx = Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx);
+                const double rs = (fs.Rs()).value();
+                const double rv = (fs.Rv()).value();
+
+                const double dis_gas_a = rs * ipr_a_perf[oil_comp_idx];
+                const double vap_oil_a = rv * ipr_a_perf[gas_comp_idx];
+
+                ipr_a_perf[gas_comp_idx] += dis_gas_a;
+                ipr_a_perf[oil_comp_idx] += vap_oil_a;
+
+                const double dis_gas_b = rs * ipr_b_perf[oil_comp_idx];
+                const double vap_oil_b = rv * ipr_b_perf[gas_comp_idx];
+
+                ipr_b_perf[gas_comp_idx] += dis_gas_b;
+                ipr_b_perf[oil_comp_idx] += vap_oil_b;
+            }
+
+            for (int p = 0; p < number_of_phases_; ++p) {
+                // TODO: double check the indices here
+                ipr_a_[ebosCompIdxToFlowCompIdx(p)] += ipr_a_perf[p];
+                ipr_b_[ebosCompIdxToFlowCompIdx(p)] += ipr_b_perf[p];
+            }
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    checkWellOperability(const Simulator& ebos_simulator,
+                         const WellState& well_state)
+    {
+        // focusing on PRODUCER for now
+        if (well_type_ == INJECTOR) {
+            return;
+        }
+
+        if (!this->underPredictionMode() ) {
+            return;
+        }
+
+        const bool old_well_operable = this->operability_status_.isOperable();
+
+        updateWellOperability(ebos_simulator, well_state);
+
+        const bool well_operable = this->operability_status_.isOperable();
+
+        if (!well_operable && old_well_operable) {
+            OpmLog::info(" well " + name() + " gets SHUT during iteration ");
+        } else if (well_operable && !old_well_operable) {
+            OpmLog::info(" well " + name() + " gets REVIVED during iteration ");
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    updateWellOperability(const Simulator& ebos_simulator,
+                          const WellState& well_state)
+    {
+        this->operability_status_.reset();
+
+        updateIPR(ebos_simulator);
+
+        // checking the BHP limit related
+        checkOperabilityUnderBHPLimitProducer(ebos_simulator);
+
+        // checking whether the well can operate under the THP constraints.
+        if (this->wellHasTHPConstraints()) {
+            checkOperabilityUnderTHPLimitProducer(ebos_simulator);
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    checkOperabilityUnderBHPLimitProducer(const Simulator& ebos_simulator)
+    {
+        const double bhp_limit = mostStrictBhpFromBhpLimits();
+        // Crude but works: default is one atmosphere.
+        // TODO: a better way to detect whether the BHP is defaulted or not
+        const bool bhp_limit_not_defaulted = bhp_limit > 1.5 * unit::barsa;
+        if ( bhp_limit_not_defaulted || !this->wellHasTHPConstraints() ) {
+            // if the BHP limit is not defaulted or the well does not have a THP limit
+            // we need to check the BHP limit
+
+            for (int p = 0; p < number_of_phases_; ++p) {
+                const double temp = ipr_a_[p] - ipr_b_[p] * bhp_limit;
+                if (temp < 0.) {
+                    this->operability_status_.operable_under_only_bhp_limit = false;
+                    break;
+                }
+            }
+
+            // checking whether running under BHP limit will violate THP limit
+            if (this->operability_status_.operable_under_only_bhp_limit && this->wellHasTHPConstraints()) {
+                // option 1: calculate well rates based on the BHP limit.
+                // option 2: stick with the above IPR curve
+                // we use IPR here
+                std::vector<double> well_rates_bhp_limit;
+                computeWellRatesWithBhp(ebos_simulator, bhp_limit, well_rates_bhp_limit);
+
+                const double thp = calculateThpFromBhp(well_rates_bhp_limit, bhp_limit);
+                const double thp_limit = this->getTHPConstraint();
+
+                if (thp < thp_limit) {
+                    this->operability_status_.obey_thp_limit_under_bhp_limit = false;
+                }
+            }
+        } else {
+            // defaulted BHP and there is a THP constraint
+            // default BHP limit is about 1 atm.
+            // when applied the hydrostatic pressure correction dp,
+            // most likely we get a negative value (bhp + dp)to search in the VFP table,
+            // which is not desirable.
+            // we assume we can operate under defaulted BHP limit and will violate the THP limit
+            // when operating under defaulted BHP limit.
+            this->operability_status_.operable_under_only_bhp_limit = true;
+            this->operability_status_.obey_thp_limit_under_bhp_limit = false;
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    checkOperabilityUnderTHPLimitProducer(const Simulator& ebos_simulator)
+    {
+        const double obtain_bhp =  calculateBHPWithTHPTargetIPR();
+
+        if (obtain_bhp > 0.) {
+            this->operability_status_.can_obtain_bhp_with_thp_limit = true;
+
+            const double  bhp_limit = mostStrictBhpFromBhpLimits();
+            this->operability_status_.obey_bhp_limit_with_thp_limit = (obtain_bhp >= bhp_limit);
+
+            const double thp_limit = this->getTHPConstraint();
+            if (obtain_bhp < thp_limit) {
+                const std::string msg = " obtained bhp " + std::to_string(unit::convert::to(obtain_bhp, unit::barsa))
+                                        + " bars is SMALLER than thp limit "
+                                        + std::to_string(unit::convert::to(thp_limit, unit::barsa))
+                                        + " bars as a producer for well " + name();
+                OpmLog::debug(msg);
+            }
+        } else {
+            this->operability_status_.can_obtain_bhp_with_thp_limit = false;
+            const double thp_limit = this->getTHPConstraint();
+            OpmLog::debug(" COULD NOT find bhp value under thp_limit "
+                          + std::to_string(unit::convert::to(thp_limit, unit::barsa))
+                          + " bars for well " + name() + ", the well might need to be closed ");
+            this->operability_status_.obey_bhp_limit_with_thp_limit = false;
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    bool
+    StandardWell<TypeTag>::
+    allDrawDownWrongDirection(const Simulator& ebos_simulator) const
+    {
+        bool all_drawdown_wrong_direction = true;
+
+        for (int perf = 0; perf < number_of_perforations_; ++perf) {
+            const int cell_idx = well_cells_[perf];
+            const auto& intQuants = *(ebos_simulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/0));
+            const auto& fs = intQuants.fluidState();
+
+            const double pressure = (fs.pressure(FluidSystem::oilPhaseIdx)).value();
+            const double bhp = getBhp().value();
+
+            // Pressure drawdown (also used to determine direction of flow)
+            const double well_pressure = bhp + perf_pressure_diffs_[perf];
+            const double drawdown = pressure - well_pressure;
+
+            // for now, if there is one perforation can produce/inject in the correct
+            // direction, we consider this well can still produce/inject.
+            // TODO: it can be more complicated than this to cause wrong-signed rates
+            if ( (drawdown < 0. && well_type_ == INJECTOR) ||
+                 (drawdown > 0. && well_type_ == PRODUCER) )  {
+                all_drawdown_wrong_direction = false;
+                break;
+            }
+        }
+
+        return all_drawdown_wrong_direction;
+    }
+
+
+
+
+    template<typename TypeTag>
+    bool
+    StandardWell<TypeTag>::
+    canProduceInjectWithCurrentBhp(const Simulator& ebos_simulator,
+                                   const WellState& well_state)
+    {
+        const double bhp = well_state.bhp()[index_of_well_];
+        std::vector<double> well_rates;
+        computeWellRatesWithBhp(ebos_simulator, bhp, well_rates);
+
+        const double sign = (well_type_ == PRODUCER) ? -1. : 1.;
+        const double threshold = sign * std::numeric_limits<double>::min();
+
+        bool can_produce_inject = false;
+        for (const auto value : well_rates) {
+            if (well_type_ == PRODUCER && value < threshold) {
+                can_produce_inject = true;
+                break;
+            } else if (well_type_ == INJECTOR && value > threshold) {
+                can_produce_inject = true;
+                break;
+            }
+        }
+
+        if (!can_produce_inject) {
+            OpmLog::debug(" well " + name() + " CANNOT produce or inejct ");
+        }
+
+        return can_produce_inject;
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    bool
+    StandardWell<TypeTag>::
+    openCrossFlowAvoidSingularity(const Simulator& ebos_simulator) const
+    {
+        return !getAllowCrossFlow() && allDrawDownWrongDirection(ebos_simulator);
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    updateWellStateWithTHPTargetIPR(const Simulator& ebos_simulator,
+                                    WellState& well_state) const
+    {
+        if (well_type_ == PRODUCER) {
+            updateWellStateWithTHPTargetIPRProducer(ebos_simulator,
+                                                    well_state);
+        }
+
+        if (well_type_ == INJECTOR) {
+            well_state.thp()[index_of_well_] = this->getTHPConstraint();
+            // TODO: more work needs to be done for the injectors here, while injectors
+            // have been okay with the current strategy relying on well control equation directly.
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    updateWellStateWithTHPTargetIPRProducer(const Simulator& ebos_simulator,
+                                            WellState& well_state) const
+    {
+
+        well_state.thp()[index_of_well_] = this->getTHPConstraint();
+
+        const double bhp = calculateBHPWithTHPTargetIPR();
+
+        assert(bhp > 0.0);
+
+        well_state.bhp()[index_of_well_] = bhp;
+
+        // TODO: explicit quantities are always tricky for this type of situation
         updatePrimaryVariables(well_state);
+        initPrimaryVariablesEvaluation();
+
+        std::vector<double> rates;
+        computeWellRatesWithBhp(ebos_simulator, bhp, rates);
+
+        // TODO: double checke the obtained rates
+        // this is another places we might obtain negative rates
+
+        for (int p = 0; p < number_of_phases_; ++p) {
+            well_state.wellRates()[number_of_phases_ * index_of_well_ + p] = rates[p];
+        }
+
+        // TODO: there will be something need to be done for the cases not the defaulted 3 phases,
+        // like 2 phases or solvent, polymer, etc. But we are not addressing them with THP control yet.
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    double
+    StandardWell<TypeTag>::
+    calculateBHPWithTHPTargetIPR() const
+    {
+        const double thp_target = this->getTHPConstraint();
+        const double thp_control_index = this->getTHPControlIndex();
+        const  int thp_table_id = well_controls_iget_vfp(well_controls_, thp_control_index);
+        const double alq = well_controls_iget_alq(well_controls_, thp_control_index);
+
+        // not considering injectors for now
+        const double vfp_ref_depth = vfp_properties_->getProd()->getTable(thp_table_id)->getDatumDepth();
+
+        // the density of the top perforation
+        // TODO: make sure this is properly initialized
+        // TODO: with IPR, it should be possible, even this well is a new well, we do not have
+        // TODO: any information of previous rates. However, we are lacking the pressure though.
+        // TODO: but let us not do more work related now to see what will happen
+        const double rho = perf_densities_[0];
+
+        // TODO: call a/the function for dp
+        const double dp = (vfp_ref_depth - ref_depth_) * rho * gravity_;
+
+        const double  bhp_limit = mostStrictBhpFromBhpLimits();
+
+        const double obtain_bhp = vfp_properties_->getProd()->calculateBhpWithTHPTarget(ipr_a_, ipr_b_,
+                                             bhp_limit, thp_table_id, thp_target, alq, dp);
+
+        return obtain_bhp;
     }
 
 
@@ -1537,7 +1944,7 @@ namespace Opm
         switch(well_controls_get_current_type(well_controls_)) {
             case THP:
                 type = CR::WellFailure::Type::ControlTHP;
-                control_tolerance = 1.e3; // 0.01 bar
+                control_tolerance = 1.e4; // 0.1 bar
                 break;
             case BHP:  // pressure type of control
                 type = CR::WellFailure::Type::ControlBHP;
@@ -1627,6 +2034,8 @@ namespace Opm
     StandardWell<TypeTag>::
     solveEqAndUpdateWellState(WellState& well_state)
     {
+        if (!this->isOperable()) return;
+
         // We assemble the well equations, then we check the convergence,
         // which is why we do not put the assembleWellEq here.
         BVectorWell dx_well(1);
@@ -1672,6 +2081,8 @@ namespace Opm
     StandardWell<TypeTag>::
     apply(const BVector& x, BVector& Ax) const
     {
+        if (!this->isOperable()) return;
+
         if ( param_.matrix_add_well_contributions_ )
         {
             // Contributions are already in the matrix itself
@@ -1700,6 +2111,8 @@ namespace Opm
     StandardWell<TypeTag>::
     apply(BVector& r) const
     {
+        if (!this->isOperable()) return;
+
         assert( invDrw_.size() == invDuneD_.N() );
 
         // invDrw_ = invDuneD_ * resWell_
@@ -1717,6 +2130,8 @@ namespace Opm
     StandardWell<TypeTag>::
     recoverSolutionWell(const BVector& x, BVectorWell& xw) const
     {
+        if (!this->isOperable()) return;
+
         BVectorWell resWell = resWell_;
         // resWell = resWell - B * x
         duneB_.mmv(x, resWell);
@@ -1734,6 +2149,8 @@ namespace Opm
     recoverWellSolutionAndUpdateWellState(const BVector& x,
                                           WellState& well_state) const
     {
+        if (!this->isOperable()) return;
+
         BVectorWell xw(1);
         recoverSolutionWell(x, xw);
         updateWellState(xw, well_state);
@@ -1753,18 +2170,19 @@ namespace Opm
         const int np = number_of_phases_;
         well_flux.resize(np, 0.0);
 
-        const bool allow_cf = crossFlowAllowed(ebosSimulator);
+        const bool allow_cf = getAllowCrossFlow();
 
         for (int perf = 0; perf < number_of_perforations_; ++perf) {
             const int cell_idx = well_cells_[perf];
             const auto& intQuants = *(ebosSimulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/ 0));
             // flux for each perforation
-            std::vector<EvalWell> cq_s(num_components_, 0.0);
             std::vector<EvalWell> mob(num_components_, 0.0);
             getMobility(ebosSimulator, perf, mob);
+
+            std::vector<EvalWell> cq_s(num_components_, 0.0);
             double perf_dis_gas_rate = 0.;
             double perf_vap_oil_rate = 0.;
-            computePerfRate(intQuants, mob, well_index_[perf], bhp, perf_pressure_diffs_[perf], allow_cf,
+            computePerfRate(intQuants, mob, bhp, perf, allow_cf,
                             cq_s, perf_dis_gas_rate, perf_vap_oil_rate);
 
             for(int p = 0; p < np; ++p) {
@@ -1908,7 +2326,7 @@ namespace Opm
         } else {
             // the well has a THP related constraint
             // checking whether a well is newly added, it only happens at the beginning of the report step
-            if ( !well_state.isNewWell(index_of_well_) ) {
+            if ( !well_state.effectiveEventsOccurred(index_of_well_) ) {
                 for (int p = 0; p < np; ++p) {
                     // This is dangerous for new added well
                     // since we are not handling the initialization correctly for now
@@ -1938,6 +2356,8 @@ namespace Opm
     StandardWell<TypeTag>::
     updatePrimaryVariables(const WellState& well_state) const
     {
+        if (!this->isOperable()) return;
+
         const int well_index = index_of_well_;
         const int np = number_of_phases_;
 
@@ -2081,7 +2501,6 @@ namespace Opm
     double
     StandardWell<TypeTag>::
     calculateThpFromBhp(const std::vector<double>& rates,
-                        const int control_index,
                         const double bhp) const
     {
         assert(int(rates.size()) == 3); // the vfp related only supports three phases now.
@@ -2090,32 +2509,30 @@ namespace Opm
         const double liquid = rates[Oil];
         const double vapour = rates[Gas];
 
-        const int vfp        = well_controls_iget_vfp(well_controls_, control_index);
-        const double& alq    = well_controls_iget_alq(well_controls_, control_index);
-
         // pick the density in the top layer
         const double rho = perf_densities_[0];
 
         double thp = 0.0;
         if (well_type_ == INJECTOR) {
-            const double vfp_ref_depth = vfp_properties_->getInj()->getTable(vfp)->getDatumDepth();
-
+            const int table_id = well_ecl_->getInjectionProperties(current_step_).VFPTableNumber;
+            const double vfp_ref_depth = vfp_properties_->getInj()->getTable(table_id)->getDatumDepth();
             const double dp = wellhelpers::computeHydrostaticCorrection(ref_depth_, vfp_ref_depth, rho, gravity_);
 
-            thp = vfp_properties_->getInj()->thp(vfp, aqua, liquid, vapour, bhp + dp);
-         }
-         else if (well_type_ == PRODUCER) {
-             const double vfp_ref_depth = vfp_properties_->getProd()->getTable(vfp)->getDatumDepth();
+            thp = vfp_properties_->getInj()->thp(table_id, aqua, liquid, vapour, bhp + dp);
+        }
+        else if (well_type_ == PRODUCER) {
+            const int table_id = well_ecl_->getProductionProperties(current_step_).VFPTableNumber;
+            const double alq = well_ecl_->getProductionProperties(current_step_).ALQValue;
+            const double vfp_ref_depth = vfp_properties_->getProd()->getTable(table_id)->getDatumDepth();
+            const double dp = wellhelpers::computeHydrostaticCorrection(ref_depth_, vfp_ref_depth, rho, gravity_);
 
-             const double dp = wellhelpers::computeHydrostaticCorrection(ref_depth_, vfp_ref_depth, rho, gravity_);
+            thp = vfp_properties_->getProd()->thp(table_id, aqua, liquid, vapour, bhp + dp, alq);
+        }
+        else {
+            OPM_THROW(std::logic_error, "Expected INJECTOR or PRODUCER well");
+        }
 
-             thp = vfp_properties_->getProd()->thp(vfp, aqua, liquid, vapour, bhp + dp, alq);
-         }
-         else {
-             OPM_THROW(std::logic_error, "Expected INJECTOR or PRODUCER well");
-         }
-
-         return thp;
+        return thp;
     }
 
 
@@ -2151,12 +2568,14 @@ namespace Opm
                 return;
             }
             // compute the well water velocity with out shear effects.
-            const bool allow_cf = crossFlowAllowed(ebos_simulator);
+            // TODO: do we need to turn on crossflow here?
+            const bool allow_cf = getAllowCrossFlow() || openCrossFlowAvoidSingularity(ebos_simulator);
             const EvalWell& bhp = getBhp();
+
             std::vector<EvalWell> cq_s(num_components_,0.0);
             double perf_dis_gas_rate = 0.;
             double perf_vap_oil_rate = 0.;
-            computePerfRate(int_quant, mob, well_index_[perf], bhp, perf_pressure_diffs_[perf], allow_cf,
+            computePerfRate(int_quant, mob, bhp, perf, allow_cf,
                             cq_s, perf_dis_gas_rate, perf_vap_oil_rate);
             // TODO: make area a member
             const double area = 2 * M_PI * perf_rep_radius_[perf] * perf_length_[perf];
@@ -2214,5 +2633,183 @@ namespace Opm
                 (*col) -= tmp1;
             }
         }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    double
+    StandardWell<TypeTag>::
+    relaxationFactorFraction(const double old_value,
+                             const double dx)
+    {
+        assert(old_value >= 0. && old_value <= 1.0);
+
+        double relaxation_factor = 1.;
+
+        // updated values without relaxation factor
+        const double possible_updated_value = old_value - dx;
+
+        // 0.95 is an experimental value remains to be optimized
+        if (possible_updated_value < 0.0) {
+            relaxation_factor = std::abs(old_value / dx) * 0.95;
+        } else if (possible_updated_value > 1.0) {
+            relaxation_factor = std::abs((1. - old_value) / dx) * 0.95;
+        }
+        // if possible_updated_value is between 0. and 1.0, then relaxation_factor
+        // remains to be one
+
+        assert(relaxation_factor >= 0. && relaxation_factor <= 1.);
+
+        return relaxation_factor;
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    double
+    StandardWell<TypeTag>::
+    relaxationFactorFractionsProducer(const std::vector<double>& primary_variables,
+                                      const BVectorWell& dwells)
+    {
+        // TODO: not considering solvent yet
+        // 0.95 is a experimental value, which remains to be optimized
+        double relaxation_factor = 1.0;
+
+        if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
+            const double relaxation_factor_w = relaxationFactorFraction(primary_variables[WFrac], dwells[0][WFrac]);
+            relaxation_factor = std::min(relaxation_factor, relaxation_factor_w);
+        }
+
+        if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+            const double relaxation_factor_g = relaxationFactorFraction(primary_variables[GFrac], dwells[0][GFrac]);
+            relaxation_factor = std::min(relaxation_factor, relaxation_factor_g);
+        }
+
+        if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) && FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+            // We need to make sure the even with the relaxation_factor, the sum of F_w and F_g is below one, so there will
+            // not be negative oil fraction later
+            const double original_sum = primary_variables[WFrac] + primary_variables[GFrac];
+            const double relaxed_update = (dwells[0][WFrac] + dwells[0][GFrac]) * relaxation_factor;
+            const double possible_updated_sum = original_sum - relaxed_update;
+
+            if (possible_updated_sum > 1.0) {
+                assert(relaxed_update != 0.);
+
+                const double further_relaxation_factor = std::abs((1. - original_sum) / relaxed_update) * 0.95;
+                relaxation_factor *= further_relaxation_factor;
+            }
+        }
+
+        assert(relaxation_factor >= 0.0 && relaxation_factor <= 1.0);
+
+        return relaxation_factor;
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    double
+    StandardWell<TypeTag>::
+    relaxationFactorRate(const std::vector<double>& primary_variables,
+                         const BVectorWell& dwells)
+    {
+        double relaxation_factor = 1.0;
+
+        // For injector, we only check the total rates to avoid sign change of rates
+        const double original_total_rate = primary_variables[WQTotal];
+        const double newton_update = dwells[0][WQTotal];
+        const double possible_update_total_rate = primary_variables[WQTotal] - newton_update;
+
+        // 0.8 here is a experimental value, which remains to be optimized
+        // if the original rate is zero or possible_update_total_rate is zero, relaxation_factor will
+        // always be 1.0, more thoughts might be needed.
+        if (original_total_rate * possible_update_total_rate < 0.) { // sign changed
+            relaxation_factor = std::abs(original_total_rate / newton_update) * 0.8;
+        }
+
+        assert(relaxation_factor >= 0.0 && relaxation_factor <= 1.0);
+
+        return relaxation_factor;
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    wellTestingPhysical(Simulator& ebos_simulator, const std::vector<double>& B_avg,
+                        const double simulation_time, const int report_step, const bool terminal_output,
+                        WellState& well_state, WellTestState& welltest_state, wellhelpers::WellSwitchingLogger& logger)
+    {
+        OpmLog::debug(" well " + name() + " is being tested for physical limits");
+
+        // some most difficult things are the explicit quantities, since there is no information
+        // in the WellState to do a decent initialization
+
+        // TODO: Let us assume that the simulator is updated
+
+        // Let us try to do a normal simualtion running, to keep checking the operability status
+        // If the well is not operable during any of the time. It means it does not pass the physical
+        // limit test.
+
+        // create a copy of the well_state to use. If the operability checking is sucessful, we use this one
+        // to replace the original one
+        WellState well_state_copy = well_state;
+
+        // TODO: well state for this well is kind of all zero status
+        // we should be able to provide a better initialization
+        calculateExplicitQuantities(ebos_simulator, well_state_copy);
+
+        updateWellOperability(ebos_simulator, well_state_copy);
+
+        if ( !this->isOperable() ) {
+            const std::string msg = " well " + name() + " is not operable during well testing for physical reason";
+            OpmLog::debug(msg);
+            return;
+        }
+
+        updateWellStateWithTarget(ebos_simulator, well_state_copy);
+
+        calculateExplicitQuantities(ebos_simulator, well_state_copy);
+        updatePrimaryVariables(well_state_copy);
+        initPrimaryVariablesEvaluation();
+
+        const bool converged = this->solveWellEqUntilConverged(ebos_simulator, B_avg, well_state_copy, logger);
+
+        if (!converged) {
+            const std::string msg = " well " + name() + " did not get converged during well testing for physical reason";
+            OpmLog::debug(msg);
+            return;
+        }
+
+        if (this->isOperable() ) {
+            welltest_state.openWell(name() );
+            const std::string msg = " well " + name() + " is re-opened through well testing for physical reason";
+            OpmLog::info(msg);
+            well_state = well_state_copy;
+        } else {
+            const std::string msg = " well " + name() + " is not operable during well testing for physical reason";
+            OpmLog::debug(msg);
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    updateWaterThroughput(const double dt OPM_UNUSED, WellState& well_state OPM_UNUSED) const
+    {
     }
 }

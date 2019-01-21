@@ -25,7 +25,7 @@
 
 
 #include <opm/autodiff/WellInterface.hpp>
-#include <opm/autodiff/ISTLSolver.hpp>
+#include <opm/autodiff/ISTLSolverEbos.hpp>
 #include <opm/autodiff/RateConverter.hpp>
 
 namespace Opm
@@ -37,7 +37,6 @@ namespace Opm
 
     public:
         typedef WellInterface<TypeTag> Base;
-        typedef typename GET_PROP_TYPE(TypeTag, RateVector) RateVector;
 
         // TODO: some functions working with AD variables handles only with values (double) without
         // dealing with derivatives. It can be beneficial to make functions can work with either AD or scalar value.
@@ -60,13 +59,16 @@ namespace Opm
 
         // polymer concentration and temperature are already known by the well, so
         // polymer and energy conservation do not need to be considered explicitly
-        static const int numPolymerEq = has_polymer ? 1 : 0;
-        static const int numEnergyEq = has_energy ? 1 : 0;
+        static const int numPolymerEq = Indices::numPolymers;
+        static const int numEnergyEq = Indices::numEnergy;
+
         // number of the conservation equations
         static const int numWellConservationEq = numEq - numPolymerEq - numEnergyEq;
         // number of the well control equations
         static const int numWellControlEq = 1;
-        static const int numWellEq = numWellConservationEq + numWellControlEq;
+        // number of the well equations that will always be used
+        // based on the solution strategy, there might be other well equations be introduced
+        static const int numStaticWellEq = numWellConservationEq + numWellControlEq;
 
         // the positions of the primary variables for StandardWell
         // the first one is the weighted total rate (WQ_t), the second and the third ones are F_w and F_g,
@@ -85,7 +87,11 @@ namespace Opm
         // the index for Bhp in primary variables and also the index of well control equation
         // they both will be the last one in their respective system.
         // TODO: we should have indices for the well equations and well primary variables separately
-        static const int Bhp = numWellEq - numWellControlEq;
+        static const int Bhp = numStaticWellEq - numWellControlEq;
+
+        // total number of the well equations and primary variables
+        // for StandardWell, no extra well equations will be used.
+        static const int numWellEq = numStaticWellEq;
 
         using typename Base::Scalar;
 
@@ -109,7 +115,6 @@ namespace Opm
 
         // the matrix type for the diagonal matrix D
         typedef Dune::FieldMatrix<Scalar, numWellEq, numWellEq > DiagMatrixBlockWellType;
-
         typedef Dune::BCRSMatrix <DiagMatrixBlockWellType> DiagMatWell;
 
         // the matrix type for the non-diagonal matrix B and C^T
@@ -140,9 +145,8 @@ namespace Opm
                                     const double dt,
                                     WellState& well_state) override;
 
-        /// updating the well state based the control mode specified with current
-        // TODO: later will check wheter we need current
-        virtual void updateWellStateWithTarget(WellState& well_state) const override;
+        virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
+                                               WellState& well_state) const override;
 
         /// check whether the well equations get converged for this well
         virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg) const override;
@@ -175,17 +179,6 @@ namespace Opm
         virtual bool jacobianContainsWellContributions() const override
         {
             return param_.matrix_add_well_contributions_;
-        }
-
-        void addCellRates(RateVector& rates, int cellIdx) const override
-        {
-            for (int perfIdx = 0; perfIdx < number_of_perforations_; ++perfIdx) {
-                if (Base::cells()[perfIdx] == cellIdx) {
-                    for (int i = 0; i < RateVector::dimension; ++i) {
-                        rates[i] += connectionRates_[perfIdx][i];
-                    }
-                }
-            }
         }
 
     protected:
@@ -222,6 +215,7 @@ namespace Opm
         using Base::well_controls_;
         using Base::well_type_;
         using Base::num_components_;
+        using Base::connectionRates_;
 
         using Base::perf_rep_radius_;
         using Base::perf_length_;
@@ -241,8 +235,6 @@ namespace Opm
         // diagonal matrix for the well
         DiagMatWell invDuneD_;
 
-        std::vector<RateVector> connectionRates_;
-
         // several vector used in the matrix calculation
         mutable BVectorWell Bx_;
         mutable BVectorWell invDrw_;
@@ -257,6 +249,13 @@ namespace Opm
         // the saturations in the well bore under surface conditions at the beginning of the time step
         std::vector<double> F0_;
 
+        // the vectors used to describe the inflow performance relationship (IPR)
+        // Q = IPR_A - BHP * IPR_B
+        // TODO: it minght need to go to WellInterface, let us implement it in StandardWell first
+        // it is only updated and used for producers for now
+        mutable std::vector<double> ipr_a_;
+        mutable std::vector<double> ipr_b_;
+
         const EvalWell& getBhp() const;
 
         EvalWell getQs(const int comp_idx) const;
@@ -270,8 +269,6 @@ namespace Opm
         EvalWell wellSurfaceVolumeFraction(const int phase) const;
 
         EvalWell extendEval(const Eval& in) const;
-
-        bool crossFlowAllowed(const Simulator& ebosSimulator) const;
 
         // xw = inv(D)*(rw - C*x)
         void recoverSolutionWell(const BVector& x, BVectorWell& xw) const;
@@ -311,12 +308,14 @@ namespace Opm
         void computeWellConnectionPressures(const Simulator& ebosSimulator,
                                                     const WellState& well_state);
 
-        // TODO: to check whether all the paramters are required
         void computePerfRate(const IntensiveQuantities& intQuants,
-                             const std::vector<EvalWell>& mob_perfcells_dense,
-                             const double Tw, const EvalWell& bhp, const double& cdp,
-                             const bool& allow_cf, std::vector<EvalWell>& cq_s,
-                             double& perf_dis_gas_rate, double& perf_vap_oil_rate) const;
+                             const std::vector<EvalWell>& mob,
+                             const EvalWell& bhp,
+                             const int perf,
+                             const bool allow_cf,
+                             std::vector<EvalWell>& cq_s,
+                             double& perf_dis_gas_rate,
+                             double& perf_vap_oil_rate) const;
 
         // TODO: maybe we should provide a light version of computePerfRate, which does not include the
         // calculation of the derivatives
@@ -331,7 +330,7 @@ namespace Opm
         template <class ValueType>
         ValueType calculateBhpFromThp(const std::vector<ValueType>& rates, const int control_index) const;
 
-        double calculateThpFromBhp(const std::vector<double>& rates, const int control_index, const double bhp) const;
+        double calculateThpFromBhp(const std::vector<double>& rates, const double bhp) const;
 
         // get the mobility for specific perforation
         void getMobility(const Simulator& ebosSimulator,
@@ -354,6 +353,70 @@ namespace Opm
         // handle the non reasonable fractions due to numerical overshoot
         void processFractions() const;
 
+        // updating the inflow based on the current reservoir condition
+        void updateIPR(const Simulator& ebos_simulator) const;
+
+        // update the operability status of the well is operable under the current reservoir condition
+        // mostly related to BHP limit and THP limit
+        virtual void checkWellOperability(const Simulator& ebos_simulator,
+                                          const WellState& well_state) override;
+
+        // check whether the well is operable under the current reservoir condition
+        // mostly related to BHP limit and THP limit
+        void updateWellOperability(const Simulator& ebos_simulator,
+                                   const WellState& well_state);
+
+        // check whether the well is operable under BHP limit with current reservoir condition
+        void checkOperabilityUnderBHPLimitProducer(const Simulator& ebos_simulator);
+
+        // check whether the well is operable under THP limit with current reservoir condition
+        void checkOperabilityUnderTHPLimitProducer(const Simulator& ebos_simulator);
+
+        // update WellState based on IPR and associated VFP table
+        void updateWellStateWithTHPTargetIPR(const Simulator& ebos_simulator,
+                                             WellState& well_state) const;
+
+        void updateWellStateWithTHPTargetIPRProducer(const Simulator& ebos_simulator,
+                                                     WellState& well_state) const;
+
+        // for a well, when all drawdown are in the wrong direction, then this well will not
+        // be able to produce/inject .
+        bool allDrawDownWrongDirection(const Simulator& ebos_simulator) const;
+
+        // whether the well can produce / inject based on the current well state (bhp)
+        bool canProduceInjectWithCurrentBhp(const Simulator& ebos_simulator,
+                                            const WellState& well_state);
+
+        // turn on crossflow to avoid singular well equations
+        // when the well is banned from cross-flow and the BHP is not properly initialized,
+        // we turn on crossflow to avoid singular well equations. It can result in wrong-signed
+        // well rates, it can cause problem for THP calculation
+        // TODO: looking for better alternative to avoid wrong-signed well rates
+        bool openCrossFlowAvoidSingularity(const Simulator& ebos_simulator) const;
+
+        // calculate the BHP from THP target based on IPR
+        // TODO: we need to check the operablility here first, if not operable, then maybe there is
+        // no point to do this
+        double calculateBHPWithTHPTargetIPR() const;
+
+        // relaxation factor considering only one fraction value
+        static double relaxationFactorFraction(const double old_value,
+                                               const double dx);
+
+        // calculate a relaxation factor to avoid overshoot of the fractions for producers
+        // which might result in negative rates
+        static double relaxationFactorFractionsProducer(const std::vector<double>& primary_variables,
+                                                        const BVectorWell& dwells);
+
+        // calculate a relaxation factor to avoid overshoot of total rates
+        static double relaxationFactorRate(const std::vector<double>& primary_variables,
+                                           const BVectorWell& dwells);
+
+        virtual void wellTestingPhysical(Simulator& simulator, const std::vector<double>& B_avg,
+                                         const double simulation_time, const int report_step, const bool terminal_output,
+                                         WellState& well_state, WellTestState& welltest_state, wellhelpers::WellSwitchingLogger& logger) override;
+
+        virtual void updateWaterThroughput(const double dt, WellState& well_state) const override;
     };
 
 }

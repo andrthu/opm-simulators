@@ -20,14 +20,14 @@
 #ifndef OPM_ISTLSOLVER_EBOS_HEADER_INCLUDED
 #define OPM_ISTLSOLVER_EBOS_HEADER_INCLUDED
 
+#include <opm/autodiff/MatrixBlock.hpp>
 #include <opm/autodiff/BlackoilAmg.hpp>
 #include <opm/autodiff/CPRPreconditioner.hpp>
-#include <opm/autodiff/NewtonIterationBlackoilInterleaved.hpp>
-#include <opm/autodiff/NewtonIterationUtilities.hpp>
+#include <opm/autodiff/MPIUtilities.hpp>
 #include <opm/autodiff/ParallelRestrictedAdditiveSchwarz.hpp>
 #include <opm/autodiff/ParallelOverlappingILU0.hpp>
-#include <opm/autodiff/AutoDiffHelpers.hpp>
-
+#include <opm/autodiff/ExtractParallelGridInformationToISTL.hpp>
+#include <opm/autodiff/BlackoilDetails.hpp>
 #include <opm/common/Exceptions.hpp>
 #include <opm/core/linalg/ParallelIstlInformation.hpp>
 #include <opm/common/utility/platform_dependent/disable_warnings.h>
@@ -50,304 +50,114 @@ NEW_TYPE_TAG(FlowIstlSolver, INHERITS_FROM(FlowIstlSolverParams));
 
 NEW_PROP_TAG(Scalar);
 NEW_PROP_TAG(GlobalEqVector);
-NEW_PROP_TAG(JacobianMatrix);
+NEW_PROP_TAG(SparseMatrixAdapter);
 NEW_PROP_TAG(Indices);
+NEW_PROP_TAG(Simulator);
+NEW_PROP_TAG(EclWellModel);
 
 END_PROPERTIES
 
-namespace Dune
-{
-namespace FMatrixHelp {
-//! invert 4x4 Matrix without changing the original matrix
-template <typename K>
-static inline K invertMatrix (const FieldMatrix<K,4,4> &matrix, FieldMatrix<K,4,4> &inverse)
-{
-    inverse[0][0] = matrix[1][1] * matrix[2][2] * matrix[3][3] -
-            matrix[1][1] * matrix[2][3] * matrix[3][2] -
-            matrix[2][1] * matrix[1][2] * matrix[3][3] +
-            matrix[2][1] * matrix[1][3] * matrix[3][2] +
-            matrix[3][1] * matrix[1][2] * matrix[2][3] -
-            matrix[3][1] * matrix[1][3] * matrix[2][2];
-
-    inverse[1][0] = -matrix[1][0] * matrix[2][2] * matrix[3][3] +
-            matrix[1][0] * matrix[2][3] * matrix[3][2] +
-            matrix[2][0] * matrix[1][2] * matrix[3][3] -
-            matrix[2][0] * matrix[1][3] * matrix[3][2] -
-            matrix[3][0] * matrix[1][2] * matrix[2][3] +
-            matrix[3][0] * matrix[1][3] * matrix[2][2];
-
-    inverse[2][0] = matrix[1][0] * matrix[2][1] * matrix[3][3] -
-            matrix[1][0] * matrix[2][3] * matrix[3][1] -
-            matrix[2][0] * matrix[1][1] * matrix[3][3] +
-            matrix[2][0] * matrix[1][3] * matrix[3][1] +
-            matrix[3][0] * matrix[1][1] * matrix[2][3] -
-            matrix[3][0] * matrix[1][3] * matrix[2][1];
-
-    inverse[3][0] = -matrix[1][0] * matrix[2][1] * matrix[3][2] +
-            matrix[1][0] * matrix[2][2] * matrix[3][1] +
-            matrix[2][0] * matrix[1][1] * matrix[3][2] -
-            matrix[2][0] * matrix[1][2] * matrix[3][1] -
-            matrix[3][0] * matrix[1][1] * matrix[2][2] +
-            matrix[3][0] * matrix[1][2] * matrix[2][1];
-
-    inverse[0][1]= -matrix[0][1]  * matrix[2][2] * matrix[3][3] +
-            matrix[0][1] * matrix[2][3] * matrix[3][2] +
-            matrix[2][1] * matrix[0][2] * matrix[3][3] -
-            matrix[2][1] * matrix[0][3] * matrix[3][2] -
-            matrix[3][1] * matrix[0][2] * matrix[2][3] +
-            matrix[3][1] * matrix[0][3] * matrix[2][2];
-
-    inverse[1][1] = matrix[0][0] * matrix[2][2] * matrix[3][3] -
-            matrix[0][0] * matrix[2][3] * matrix[3][2] -
-            matrix[2][0] * matrix[0][2] * matrix[3][3] +
-            matrix[2][0] * matrix[0][3] * matrix[3][2] +
-            matrix[3][0] * matrix[0][2] * matrix[2][3] -
-            matrix[3][0] * matrix[0][3] * matrix[2][2];
-
-    inverse[2][1] = -matrix[0][0] * matrix[2][1] * matrix[3][3] +
-            matrix[0][0] * matrix[2][3] * matrix[3][1] +
-            matrix[2][0] * matrix[0][1] * matrix[3][3] -
-            matrix[2][0] * matrix[0][3] * matrix[3][1] -
-            matrix[3][0] * matrix[0][1] * matrix[2][3] +
-            matrix[3][0] * matrix[0][3] * matrix[2][1];
-
-    inverse[3][1] = matrix[0][0] * matrix[2][1] * matrix[3][2] -
-            matrix[0][0] * matrix[2][2] * matrix[3][1] -
-            matrix[2][0] * matrix[0][1] * matrix[3][2] +
-            matrix[2][0] * matrix[0][2] * matrix[3][1] +
-            matrix[3][0] * matrix[0][1] * matrix[2][2] -
-            matrix[3][0] * matrix[0][2] * matrix[2][1];
-
-    inverse[0][2] = matrix[0][1] * matrix[1][2] * matrix[3][3] -
-            matrix[0][1] * matrix[1][3] * matrix[3][2] -
-            matrix[1][1] * matrix[0][2] * matrix[3][3] +
-            matrix[1][1] * matrix[0][3] * matrix[3][2] +
-            matrix[3][1] * matrix[0][2] * matrix[1][3] -
-            matrix[3][1] * matrix[0][3] * matrix[1][2];
-
-    inverse[1][2] = -matrix[0][0]  * matrix[1][2] * matrix[3][3] +
-            matrix[0][0] * matrix[1][3] * matrix[3][2] +
-            matrix[1][0] * matrix[0][2] * matrix[3][3] -
-            matrix[1][0] * matrix[0][3] * matrix[3][2] -
-            matrix[3][0] * matrix[0][2] * matrix[1][3] +
-            matrix[3][0] * matrix[0][3] * matrix[1][2];
-
-    inverse[2][2] = matrix[0][0] * matrix[1][1] * matrix[3][3] -
-            matrix[0][0] * matrix[1][3] * matrix[3][1] -
-            matrix[1][0] * matrix[0][1] * matrix[3][3] +
-            matrix[1][0] * matrix[0][3] * matrix[3][1] +
-            matrix[3][0] * matrix[0][1] * matrix[1][3] -
-            matrix[3][0] * matrix[0][3] * matrix[1][1];
-
-    inverse[3][2] = -matrix[0][0] * matrix[1][1] * matrix[3][2] +
-            matrix[0][0] * matrix[1][2] * matrix[3][1] +
-            matrix[1][0] * matrix[0][1] * matrix[3][2] -
-            matrix[1][0] * matrix[0][2] * matrix[3][1] -
-            matrix[3][0] * matrix[0][1] * matrix[1][2] +
-            matrix[3][0] * matrix[0][2] * matrix[1][1];
-
-    inverse[0][3] = -matrix[0][1] * matrix[1][2] * matrix[2][3] +
-            matrix[0][1] * matrix[1][3] * matrix[2][2] +
-            matrix[1][1] * matrix[0][2] * matrix[2][3] -
-            matrix[1][1] * matrix[0][3] * matrix[2][2] -
-            matrix[2][1] * matrix[0][2] * matrix[1][3] +
-            matrix[2][1] * matrix[0][3] * matrix[1][2];
-
-    inverse[1][3] = matrix[0][0] * matrix[1][2] * matrix[2][3] -
-            matrix[0][0] * matrix[1][3] * matrix[2][2] -
-            matrix[1][0] * matrix[0][2] * matrix[2][3] +
-            matrix[1][0] * matrix[0][3] * matrix[2][2] +
-            matrix[2][0] * matrix[0][2] * matrix[1][3] -
-            matrix[2][0] * matrix[0][3] * matrix[1][2];
-
-    inverse[2][3] = -matrix[0][0] * matrix[1][1] * matrix[2][3] +
-            matrix[0][0] * matrix[1][3] * matrix[2][1] +
-            matrix[1][0] * matrix[0][1] * matrix[2][3] -
-            matrix[1][0] * matrix[0][3] * matrix[2][1] -
-            matrix[2][0] * matrix[0][1] * matrix[1][3] +
-            matrix[2][0] * matrix[0][3] * matrix[1][1];
-
-    inverse[3][3] = matrix[0][0] * matrix[1][1] * matrix[2][2] -
-            matrix[0][0] * matrix[1][2] * matrix[2][1] -
-            matrix[1][0] * matrix[0][1] * matrix[2][2] +
-            matrix[1][0] * matrix[0][2] * matrix[2][1] +
-            matrix[2][0] * matrix[0][1] * matrix[1][2] -
-            matrix[2][0] * matrix[0][2] * matrix[1][1];
-
-    K det = matrix[0][0] * inverse[0][0] + matrix[0][1] * inverse[1][0] + matrix[0][2] * inverse[2][0] + matrix[0][3] * inverse[3][0];
-
-    // return identity for singular or nearly singular matrices.
-    if (std::abs(det) < 1e-40) {
-        for (int i = 0; i < 4; ++i){
-            inverse[i][i] = 1.0;
-        }
-        return 1.0;
-    }
-    K inv_det = 1.0 / det;
-    inverse *= inv_det;
-
-    return det;
-}
-} // end FMatrixHelp
-
-namespace ISTLUtility {
-
-//! invert matrix by calling FMatrixHelp::invert
-template <typename K>
-static inline void invertMatrix (FieldMatrix<K,1,1> &matrix)
-{
-    FieldMatrix<K,1,1> A ( matrix );
-    FMatrixHelp::invertMatrix(A, matrix );
-}
-
-//! invert matrix by calling FMatrixHelp::invert
-template <typename K>
-static inline void invertMatrix (FieldMatrix<K,2,2> &matrix)
-{
-    FieldMatrix<K,2,2> A ( matrix );
-    FMatrixHelp::invertMatrix(A, matrix );
-}
-
-//! invert matrix by calling FMatrixHelp::invert
-template <typename K>
-static inline void invertMatrix (FieldMatrix<K,3,3> &matrix)
-{
-    FieldMatrix<K,3,3> A ( matrix );
-    FMatrixHelp::invertMatrix(A, matrix );
-}
-
-//! invert matrix by calling FMatrixHelp::invert
-template <typename K>
-static inline void invertMatrix (FieldMatrix<K,4,4> &matrix)
-{
-    FieldMatrix<K,4,4> A ( matrix );
-    FMatrixHelp::invertMatrix(A, matrix );
-}
-
-//! invert matrix by calling matrix.invert
-template <typename K, int n>
-static inline void invertMatrix (FieldMatrix<K,n,n> &matrix)
-{
-#if ! DUNE_VERSION_NEWER( DUNE_COMMON, 2, 7 )
-    Dune::FMatrixPrecision<K>::set_singular_limit(1.e-20);
-#endif
-    matrix.invert();
-}
-
-} // end ISTLUtility
-
-template <class Scalar, int n, int m>
-class MatrixBlock : public Dune::FieldMatrix<Scalar, n, m>
-{
-public:
-    typedef Dune::FieldMatrix<Scalar, n, m>  BaseType;
-
-    using BaseType :: operator= ;
-    using BaseType :: rows;
-    using BaseType :: cols;
-    explicit MatrixBlock( const Scalar scalar = 0 ) : BaseType( scalar ) {}
-    void invert()
-    {
-        ISTLUtility::invertMatrix( *this );
-    }
-    const BaseType& asBase() const { return static_cast< const BaseType& > (*this); }
-    BaseType& asBase() { return static_cast< BaseType& > (*this); }
-};
-
-template<class K, int n, int m>
-void
-print_row (std::ostream& s, const MatrixBlock<K,n,m>& A,
-           typename FieldMatrix<K,n,m>::size_type I,
-           typename FieldMatrix<K,n,m>::size_type J,
-           typename FieldMatrix<K,n,m>::size_type therow, int width,
-           int precision)
-{
-    print_row(s, A.asBase(), I, J, therow, width, precision);
-}
-
-template<class K, int n, int m>
-K& firstmatrixelement (MatrixBlock<K,n,m>& A)
-{
-   return firstmatrixelement( A.asBase() );
-}
-
-
-
-template<typename Scalar, int n, int m>
-struct MatrixDimension< MatrixBlock< Scalar, n, m > >
-: public MatrixDimension< typename MatrixBlock< Scalar, n, m >::BaseType >
-{
-};
-
-
-#if HAVE_UMFPACK
-
-/// \brief UMFPack specialization for MatrixBlock to make AMG happy
-///
-/// Without this the empty default implementation would be used.
-template<typename T, typename A, int n, int m>
-class UMFPack<BCRSMatrix<MatrixBlock<T,n,m>, A> >
-    : public UMFPack<BCRSMatrix<FieldMatrix<T,n,m>, A> >
-{
-    typedef UMFPack<BCRSMatrix<FieldMatrix<T,n,m>, A> > Base;
-    typedef BCRSMatrix<FieldMatrix<T,n,m>, A> Matrix;
-
-public:
-    typedef BCRSMatrix<MatrixBlock<T,n,m>, A> RealMatrix;
-
-    UMFPack(const RealMatrix& matrix, int verbose, bool)
-        : Base(reinterpret_cast<const Matrix&>(matrix), verbose)
-    {}
-};
-#endif
-
-#if HAVE_SUPERLU
-
-/// \brief SuperLU specialization for MatrixBlock to make AMG happy
-///
-/// Without this the empty default implementation would be used.
-template<typename T, typename A, int n, int m>
-class SuperLU<BCRSMatrix<MatrixBlock<T,n,m>, A> >
-    : public SuperLU<BCRSMatrix<FieldMatrix<T,n,m>, A> >
-{
-    typedef SuperLU<BCRSMatrix<FieldMatrix<T,n,m>, A> > Base;
-    typedef BCRSMatrix<FieldMatrix<T,n,m>, A> Matrix;
-
-public:
-    typedef BCRSMatrix<MatrixBlock<T,n,m>, A> RealMatrix;
-
-    SuperLU(const RealMatrix& matrix, int verbose, bool reuse=true)
-        : Base(reinterpret_cast<const Matrix&>(matrix), verbose, reuse)
-    {}
-};
-#endif
-
-
-} // end namespace Dune
-
 namespace Opm
 {
-namespace Detail
-{
-    //! calculates ret = A^T * B
-    template< class K, int m, int n, int p >
-    static inline void multMatrixTransposed ( const Dune::FieldMatrix< K, n, m > &A,
-                                              const Dune::FieldMatrix< K, n, p > &B,
-                                              Dune::FieldMatrix< K, m, p > &ret )
-    {
-        typedef typename Dune::FieldMatrix< K, m, p > :: size_type size_type;
+//=====================================================================
+// Implementation for ISTL-matrix based operator
+//=====================================================================
 
-        for( size_type i = 0; i < m; ++i )
-        {
-            for( size_type j = 0; j < p; ++j )
-            {
-                ret[ i ][ j ] = K( 0 );
-                for( size_type k = 0; k < n; ++k )
-                    ret[ i ][ j ] += A[ k ][ i ] * B[ k ][ j ];
-            }
-        }
+/*!
+   \brief Adapter to turn a matrix into a linear operator.
+
+   Adapts a matrix to the assembled linear operator interface
+ */
+template<class M, class X, class Y, class WellModel, bool overlapping >
+class WellModelMatrixAdapter : public Dune::AssembledLinearOperator<M,X,Y>
+{
+  typedef Dune::AssembledLinearOperator<M,X,Y> BaseType;
+
+public:
+  typedef M matrix_type;
+  typedef X domain_type;
+  typedef Y range_type;
+  typedef typename X::field_type field_type;
+
+#if HAVE_MPI
+  typedef Dune::OwnerOverlapCopyCommunication<int,int> communication_type;
+#else
+  typedef Dune::CollectiveCommunication< int > communication_type;
+#endif
+
+#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
+  Dune::SolverCategory::Category category() const override
+  {
+    return overlapping ?
+           Dune::SolverCategory::overlapping : Dune::SolverCategory::sequential;
+  }
+#else
+  enum {
+    //! \brief The solver category.
+    category = overlapping ?
+        Dune::SolverCategory::overlapping :
+        Dune::SolverCategory::sequential
+  };
+#endif
+
+  //! constructor: just store a reference to a matrix
+  WellModelMatrixAdapter (const M& A,
+                          const M& A_for_precond,
+                          const WellModel& wellMod,
+                          const boost::any& parallelInformation = boost::any() )
+      : A_( A ), A_for_precond_(A_for_precond), wellMod_( wellMod ), comm_()
+  {
+#if HAVE_MPI
+    if( parallelInformation.type() == typeid(ParallelISTLInformation) )
+    {
+      const ParallelISTLInformation& info =
+          boost::any_cast<const ParallelISTLInformation&>( parallelInformation);
+      comm_.reset( new communication_type( info.communicator() ) );
     }
-}
+#endif
+  }
+
+  virtual void apply( const X& x, Y& y ) const
+  {
+    A_.mv( x, y );
+
+    // add well model modification to y
+    wellMod_.apply(x, y );
+
+#if HAVE_MPI
+    if( comm_ )
+      comm_->project( y );
+#endif
+  }
+
+  // y += \alpha * A * x
+  virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
+  {
+    A_.usmv(alpha,x,y);
+
+    // add scaled well model modification to y
+    wellMod_.applyScaleAdd( alpha, x, y );
+
+#if HAVE_MPI
+    if( comm_ )
+      comm_->project( y );
+#endif
+  }
+
+  virtual const matrix_type& getmat() const { return A_for_precond_; }
+
+  communication_type* comm()
+  {
+      return comm_.operator->();
+  }
+
+protected:
+  const matrix_type& A_ ;
+  const matrix_type& A_for_precond_ ;
+  const WellModel& wellMod_;
+  std::unique_ptr< communication_type > comm_;
+};
+
     /// This class solves the fully implicit black-oil system by
     /// solving the reduced system (after eliminating well variables)
     /// as a block-structured matrix (one block for all cell variables) for a fixed
@@ -358,45 +168,82 @@ namespace Detail
     ///                       vector block. It is used to guide the AMG coarsening.
     ///                       Default is zero.
     template <class TypeTag>
-    class ISTLSolverEbos : public NewtonIterationBlackoilInterface
+    class ISTLSolverEbos
     {
         typedef typename GET_PROP_TYPE(TypeTag, Scalar) Scalar;
-        typedef typename GET_PROP_TYPE(TypeTag, JacobianMatrix) Matrix;
+        typedef typename GET_PROP_TYPE(TypeTag, SparseMatrixAdapter) SparseMatrixAdapter;
         typedef typename GET_PROP_TYPE(TypeTag, GlobalEqVector) Vector;
         typedef typename GET_PROP_TYPE(TypeTag, Indices) Indices;
+        typedef typename GET_PROP_TYPE(TypeTag, EclWellModel) WellModel;
+        typedef typename GET_PROP_TYPE(TypeTag, Simulator) Simulator;
+        typedef typename SparseMatrixAdapter::IstlMatrix Matrix;
 
         enum { pressureIndex = Indices::pressureSwitchIdx };
+        static const int numEq = Indices::numEq;
+
 
     public:
         typedef Dune::AssembledLinearOperator< Matrix, Vector, Vector > AssembledLinearOperatorType;
 
-        typedef NewtonIterationBlackoilInterface :: SolutionVector  SolutionVector;
-
         static void registerParameters()
         {
-            NewtonIterationBlackoilInterleavedParameters::registerParameters<TypeTag>();
+            FlowLinearSolverParameters::registerParameters<TypeTag>();
         }
 
         /// Construct a system solver.
         /// \param[in] parallelInformation In the case of a parallel run
         ///                                with dune-istl the information about the parallelization.
-        ISTLSolverEbos(const boost::any& parallelInformation_arg=boost::any())
-            : iterations_( 0 )
-            , parallelInformation_(parallelInformation_arg)
-            , isIORank_(isIORank(parallelInformation_arg))
+        ISTLSolverEbos(const Simulator& simulator)
+            : simulator_(simulator),
+              iterations_( 0 ),
+              converged_(false)
         {
             parameters_.template init<TypeTag>();
+            extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
+            detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
         }
 
-        const NewtonIterationBlackoilInterleavedParameters& parameters() const
-        { return parameters_; }
-
-        // dummy method that is not implemented for this class
-        SolutionVector computeNewtonIncrement(const LinearisedBlackoilResidual&) const
-        {
-            OPM_THROW(std::logic_error,"This method is not implemented");
-            return SolutionVector();
+        // nothing to clean here
+        void eraseMatrix() {
+            matrix_for_preconditioner_.reset();
         }
+
+        void prepare(const SparseMatrixAdapter& M, Vector& b) {
+            matrix_ = &M.istlMatrix();
+            rhs_ = &b;
+        }
+
+        bool solve(Vector& x) {
+            // Solve system.
+
+            const WellModel& wellModel = simulator_.problem().wellModel();
+
+            if( isParallel() )
+            {
+                typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+
+                auto ebosJacIgnoreOverlap = Matrix(*matrix_);
+                //remove ghost rows in local matrix
+                makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
+
+                //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
+                //to be certain that correct matrix is used for preconditioning.
+                Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel,
+                             parallelInformation_ );
+                assert( opA.comm() );
+                solve( opA, x, *rhs_, *(opA.comm()) );
+            }
+            else
+            {
+                typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, false > Operator;
+                Operator opA(*matrix_, *matrix_, wellModel);
+                solve( opA, x, *rhs_ );
+            }
+
+            return converged_;
+
+        }
+
 
         /// Solve the system of linear equations Ax = b, with A being the
         /// combined derivative matrix of the residual and b
@@ -410,7 +257,7 @@ namespace Detail
         /// \copydoc NewtonIterationBlackoilInterface::parallelInformation
         const boost::any& parallelInformation() const { return parallelInformation_; }
 
-    public:
+    protected:
         /// \brief construct the CPR preconditioner and the solver.
         /// \tparam P The type of the parallel information.
         /// \param parallelInformation the information about the parallelization.
@@ -672,6 +519,7 @@ namespace Detail
         {
             // store number of iterations
             iterations_ = result.iterations;
+            converged_ = result.converged;
 
             // Check for failure of linear solver.
             if (!parameters_.ignoreConvergenceFailure_ && !result.converged) {
@@ -680,11 +528,53 @@ namespace Detail
             }
         }
     protected:
+
+        bool isParallel() const {
+#if HAVE_MPI
+            return parallelInformation_.type() == typeid(ParallelISTLInformation);
+#else
+            return false;
+#endif
+        }
+
+        /// Zero out off-diagonal blocks on rows corresponding to overlap cells
+        /// Diagonal blocks on ovelap rows are set to diag(1e100).
+        void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
+        {
+            //value to set on diagonal
+            typedef Dune::FieldMatrix<Scalar, numEq, numEq >        MatrixBlockType;
+            MatrixBlockType diag_block(0.0);
+            for (int eq = 0; eq < numEq; ++eq)
+                diag_block[eq][eq] = 1.0e100;
+
+            //loop over precalculated overlap rows and columns
+            for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
+            {
+                int lcell = row->first;
+                //diagonal block set to large value diagonal
+                ebosJacIgnoreOverlap[lcell][lcell] = diag_block;
+
+                //loop over off diagonal blocks in overlap row
+                for (auto col = row->second.begin(); col != row->second.end(); ++col)
+                {
+                    int ncell = *col;
+                    //zero out block
+                    ebosJacIgnoreOverlap[lcell][ncell] = 0.0;
+                }
+            }
+        }
+
+        const Simulator& simulator_;
         mutable int iterations_;
+        mutable bool converged_;
         boost::any parallelInformation_;
         bool isIORank_;
+        const Matrix *matrix_;
+        Vector *rhs_;
+        std::unique_ptr<Matrix> matrix_for_preconditioner_;
 
-        NewtonIterationBlackoilInterleavedParameters parameters_;
+        std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
+        FlowLinearSolverParameters parameters_;
     }; // end ISTLSolver
 
 } // namespace Opm

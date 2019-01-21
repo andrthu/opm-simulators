@@ -204,14 +204,10 @@ namespace Opm
                                const UnstructuredGrid& grid)
         : w_(create_wells(0,0,0)), is_parallel_run_(false)
     {
-        // TODO: not sure about the usage of this WellsManager constructor
-        // TODO: not sure whether this is the correct thing to do here.
-        DynamicListEconLimited dummy_list_econ_limited;
         init(eclipseState, schedule, timeStep, UgGridHelpers::numCells(grid),
-             UgGridHelpers::globalCell(grid), UgGridHelpers::cartDims(grid), 
+             UgGridHelpers::globalCell(grid), UgGridHelpers::cartDims(grid),
              UgGridHelpers::dimensions(grid),
              UgGridHelpers::cell2Faces(grid), UgGridHelpers::beginFaceCentroids(grid),
-             dummy_list_econ_limited,
              std::unordered_set<std::string>());
 
     }
@@ -297,8 +293,7 @@ namespace Opm
 
     void WellsManager::setupWellControls(std::vector< const Well* >& wells, size_t timeStep,
                                          std::vector<std::string>& well_names, const PhaseUsage& phaseUsage,
-                                         const std::vector<int>& wells_on_proc,
-                                         const DynamicListEconLimited& list_econ_limited) {
+                                         const std::vector<int>& wells_on_proc) {
         int well_index = 0;
         auto well_on_proc = wells_on_proc.begin();
 
@@ -316,11 +311,7 @@ namespace Opm
                 continue;
             }
 
-            if (list_econ_limited.wellShutEconLimited(well->name())) {
-                continue;
-            }
-
-            if (well->getStatus(timeStep) == WellCommon::STOP || list_econ_limited.wellStoppedEconLimited(well->name())) {
+            if (well->getStatus(timeStep) == WellCommon::STOP) {
                 // Stopped wells are kept in the well list but marked as stopped.
                 well_controls_stop_well(w_->ctrls[well_index]);
             }
@@ -544,10 +535,7 @@ namespace Opm
                 }
 
                 if (ok) {
-                    // Always append a BHP control.
-                    // If no explicit BHP control given, use a 1 atm control.
-                    const bool has_explicit_limit = productionProperties.hasProductionControl(WellProducer::BHP);
-                    const double bhp_limit = has_explicit_limit ? productionProperties.BHPLimit : unit::convert::from(1.0, unit::atm);
+                    const double bhp_limit = productionProperties.BHPLimit;
                     control_pos[WellsManagerDetail::ProductionControl::BHP] = well_controls_get_num(w_->ctrls[well_index]);
                     ok = append_well_controls(BHP,
                                               bhp_limit,
