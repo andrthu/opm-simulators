@@ -204,7 +204,7 @@ namespace detail {
         /// \param grid The grid where we look for overlap cells.
         /// \param overlapRowAndColumns List where overlap rows and columns are stored.
         template<class Grid>
-        void findOverlapRowsAndColumns(const Grid& grid, std::vector<std::pair<int,std::vector<int>>>& overlapRowAndColumns )
+        void findOverlapRowsAndColumns( const Grid& grid, std::vector<std::pair<int,std::vector<int>>>& overlapRowAndColumns )
         {
             //only relevant in parallel case.
             if ( grid.comm().size() > 1) 
@@ -249,7 +249,7 @@ namespace detail {
 
 	/// \brief Adjecency pattern of matrix without off-diagonals on ghost rows.
 	template<class Grid>
-	Dune::MatrixIndexSet findNoGhostAdjecency(const Grid& grid)
+	Dune::MatrixIndexSet findNoGhostAdjecency( const Grid& grid )
 	{
 	    Dune::MatrixIndexSet op;
 
@@ -292,8 +292,8 @@ namespace detail {
 		}
 	    }
 	    return op;
-	}
+        }
     } // namespace detail
 } // namespace Opm
-
+    
 #endif // OPM_BLACKOILDETAILS_HEADER_INCLUDED

@@ -768,7 +768,7 @@ public:
           mv[ i ] = rhs;  // Lii = I
         }
 
-        copyOwnerToAll( mv );
+        //copyOwnerToAll( mv );
 
         for( size_type i=0; i<iEnd; ++ i )
         {
