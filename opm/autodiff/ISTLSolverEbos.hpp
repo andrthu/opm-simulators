@@ -544,14 +544,14 @@ protected:
         }
 
         /// Zero out off-diagonal blocks on rows corresponding to overlap cells
-        /// Diagonal blocks on ovelap rows are set to diag(1e100).
+        /// Diagonal blocks on ovelap rows are set to diag(1.0).
         void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
         {
             //value to set on diagonal
-            typedef Dune::FieldMatrix<Scalar, numEq, numEq >        MatrixBlockType;
+            typedef Dune::FieldMatrix<Scalar, numEq, numEq > MatrixBlockType;
             MatrixBlockType diag_block(0.0);
             for (int eq = 0; eq < numEq; ++eq)
-                diag_block[eq][eq] = 1.0e100;
+                diag_block[eq][eq] = 1.0;
 
             //loop over precalculated overlap rows and columns
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
