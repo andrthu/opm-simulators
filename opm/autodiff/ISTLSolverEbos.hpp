@@ -227,11 +227,10 @@ protected:
             if( isParallel() )
             {
                 typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
-
                 auto ebosJacIgnoreOverlap = Matrix(*matrix_);
                 //remove ghost rows in local matrix
-                makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
 
+                makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
                 Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel,
@@ -552,22 +551,23 @@ protected:
             MatrixBlockType diag_block(0.0);
             for (int eq = 0; eq < numEq; ++eq)
                 diag_block[eq][eq] = 1.0e100;
-
+	    
             //loop over precalculated overlap rows and columns
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
             {
                 int lcell = row->first;
                 //diagonal block set to large value diagonal
                 ebosJacIgnoreOverlap[lcell][lcell] = diag_block;
-
+		
                 //loop over off diagonal blocks in overlap row
                 for (auto col = row->second.begin(); col != row->second.end(); ++col)
                 {
                     int ncell = *col;
                     //zero out block
                     ebosJacIgnoreOverlap[lcell][ncell] = 0.0;
-                }
+                }		
             }
+	    
         }
 
         const Simulator& simulator_;

@@ -831,7 +831,6 @@ protected:
                 comm_ = nullptr;
             }
         }
-
         int ilu_setup_successful = 1;
         std::string message;
         const int rank = ( comm_ ) ? comm_->communicator().rank() : 0;

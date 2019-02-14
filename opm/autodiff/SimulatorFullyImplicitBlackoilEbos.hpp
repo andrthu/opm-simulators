@@ -325,7 +325,6 @@ protected:
                                                       modelParam_,
                                                       wellModel,
                                                       terminalOutput_));
-
         return std::unique_ptr<Solver>(new Solver(solverParam_, std::move(model)));
     }
 

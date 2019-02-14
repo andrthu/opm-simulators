@@ -218,7 +218,7 @@ createAMGPreconditionerPointer(Op& opA, const double relax, const MILU_VARIANT m
     int coarsenTarget=1200;
     using Criterion = C;
     Criterion criterion(15, coarsenTarget);
-    criterion.setDebugLevel( 0 ); // no debug information, 1 for printing hierarchy information
+    criterion.setDebugLevel( 1 ); // no debug information, 1 for printing hierarchy information
     criterion.setDefaultValuesIsotropic(2);
     criterion.setNoPostSmoothSteps( 1 );
     criterion.setNoPreSmoothSteps( 1 );
@@ -254,7 +254,6 @@ createAMGPreconditionerPointer( Op& opA, const double relax, const MILU_VARIANT 
 
     // The coarsening criterion used in the AMG
     typedef Dune::Amg::CoarsenCriterion<CritBase> Criterion;
-
     createAMGPreconditionerPointer<Criterion>(opA, relax, milu, comm, amgPtr);
 }
 

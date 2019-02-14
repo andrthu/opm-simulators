@@ -460,7 +460,6 @@ namespace Opm {
         /// r is the residual.
         void solveJacobianSystem(BVector& x)
         {
-
             auto& ebosJac = ebosSimulator_.model().linearizer().jacobian();
             auto& ebosResid = ebosSimulator_.model().linearizer().residual();
             // J = [A, B; C, D], where A is the reservoir equations, B and C the interaction of well
