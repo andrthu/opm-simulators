@@ -200,7 +200,10 @@ protected:
         {
             parameters_.template init<TypeTag>();
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
-            detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
+            //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
+	    detail::findOverlapAndInterior(simulator_.vanguard().grid(),overlapRowAndColumns_,interiorRowAndColumns_ );
+	    noGhostAdjecency();
+	    setGhostsInNoGhost(*noGhost_);
         }
 
         // nothing to clean here
@@ -228,13 +231,13 @@ protected:
             {
                 typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 
-                auto ebosJacIgnoreOverlap = Matrix(*matrix_);
+                //auto ebosJacIgnoreOverlap = Matrix(*matrix_);
                 //remove ghost rows in local matrix
-                makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
-
+                //makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
+                copyJacToNoGhost(*matrix_,*noGhost_);
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
-                Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel,
+                Operator opA(*noGhost_, *noGhost_, wellModel,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -542,6 +545,97 @@ protected:
             return false;
 #endif
         }
+	/// Create sparsity pattern of matrix without off-diagonal ghost entries.
+	void noGhostAdjecency()
+        {
+	    auto grid = simulator_.vanguard().grid();
+	    typedef typename Matrix::size_type size_type;
+	    size_type numCells = grid.numCells();
+	    noGhost_.reset(new Matrix(numCells, numCells, Matrix::random));
+
+	    std::vector<std::set<size_type>> pattern;
+	    pattern.resize(numCells);
+
+            auto lid = grid.localIdSet();	    
+            const auto& gridView = grid.leafGridView();
+            auto elemIt = gridView.template begin<0>();
+            const auto& elemEndIt = gridView.template end<0>();
+	    
+            //Loop over cells
+            for (; elemIt != elemEndIt; ++elemIt) 
+            {		
+                const auto& elem = *elemIt;
+                size_type idx = lid.id(elem);
+                pattern[idx].insert(idx);
+
+		// Add just a single element to ghost rows
+		if (elem.partitionType() != Dune::InteriorEntity)
+		{
+		    noGhost_->setrowsize(idx, pattern[idx].size());
+		}
+		else {
+		    auto isend = gridView.iend(elem);
+		    for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
+                    {
+			//check if face has neighbor
+			if (is->neighbor())
+                        {
+			    size_type nid =lid.id(is->outside());
+			    pattern[idx].insert(nid);
+			}
+		    }
+		    noGhost_->setrowsize(idx, pattern[idx].size());
+		}
+	    }
+	    noGhost_->endrowsizes();
+	    for (size_type dofId = 0; dofId < numCells; ++dofId)
+	    {
+		auto nabIdx = pattern[dofId].begin();
+		auto endNab = pattern[dofId].end();
+		for (; nabIdx != endNab; ++nabIdx)
+		{
+		    noGhost_->addindex(dofId, *nabIdx);
+		}
+	    }
+	    noGhost_->endindices();
+	}
+
+	/// Set the ghost diagonal to Block(1.0)
+	void setGhostsInNoGhost(Matrix& ng)
+	{
+            ng=0;
+
+            typedef typename Matrix::block_type MatrixBlockType;
+            MatrixBlockType diag_block(0.0);
+            for (int eq = 0; eq < Matrix::block_type::rows; ++eq)
+                diag_block[eq][eq] = 1.0;
+
+            //loop over precalculated overlap rows and columns
+            for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
+            {
+                int lcell = row->first;
+                //diagonal block set to larg 1
+                ng[lcell][lcell] = diag_block;
+	    }
+	}
+	void copyJacToNoGhost(const Matrix& jac, Matrix& ng)
+	{
+            //Loop over precalculated interior rows. 
+            for (auto row = interiorRowAndColumns_.begin(); row != interiorRowAndColumns_.end(); row++ )
+            {
+                int lcell = row->first;
+                //Copy diagonal
+                ng[lcell][lcell] = jac[lcell][lcell];
+
+                //Loop over off diagonal blocks in interior row
+                for (auto col = row->second.begin(); col != row->second.end(); ++col)
+                {
+                    int ncell = *col;
+                    //Copy off-diagonal
+                    ng[lcell][ncell] = jac[lcell][ncell];
+                }
+            }
+	}
 
         /// Zero out off-diagonal blocks on rows corresponding to overlap cells
         /// Diagonal blocks on ovelap rows are set to diag(1.0).
@@ -557,7 +651,7 @@ protected:
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
             {
                 int lcell = row->first;
-                //diagonal block set to large value diagonal
+                //diagonal block set to large 1 on diagonal
                 ebosJacIgnoreOverlap[lcell][lcell] = diag_block;
 
                 //loop over off diagonal blocks in overlap row
@@ -576,10 +670,12 @@ protected:
         boost::any parallelInformation_;
         bool isIORank_;
         const Matrix *matrix_;
+	std::unique_ptr<Matrix> noGhost_;
         Vector *rhs_;
         std::unique_ptr<Matrix> matrix_for_preconditioner_;
 
         std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
+	std::vector<std::pair<int,std::vector<int>>> interiorRowAndColumns_;
         FlowLinearSolverParameters parameters_;
     }; // end ISTLSolver
 
