@@ -741,7 +741,6 @@ public:
     {
         Range& md = reorderD(d);
         Domain& mv = reorderV(v);
-        project( md );
 
         // iterator types
         typedef typename Range ::block_type  dblock;
@@ -801,13 +800,6 @@ public:
         }
     }
 
-    template <class V>
-    void project( V& v ) const
-    {
-        if( comm_ ) {
-            comm_->project( v );
-        }
-    }
     /*!
       \brief Clean up.
 
