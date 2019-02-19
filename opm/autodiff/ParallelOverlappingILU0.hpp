@@ -737,7 +737,7 @@ public:
 
       \copydoc Preconditioner::apply(X&,const Y&)
     */
-    virtual void apply (Domain& v, const Range& d)
+    virtual void apply_ (Domain& v, const Range& d)
     {
         Range& md = reorderD(d);
         Domain& mv = reorderV(v);
@@ -790,6 +790,12 @@ public:
             mv *= w_;
         }
         reorderBack(mv, v);
+    }
+
+    virtual void apply (Domain& v, const Range& d)
+    {
+	apply_(v,d);
+	apply_(v,d);
     }
 
     template <class V>
