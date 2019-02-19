@@ -72,7 +72,7 @@ SET_BOOL_PROP(FlowIstlSolverParams, IluReorderSpheres, false);
 SET_BOOL_PROP(FlowIstlSolverParams, UseGmres, false);
 SET_BOOL_PROP(FlowIstlSolverParams, LinearSolverRequireFullSparsityPattern, false);
 SET_BOOL_PROP(FlowIstlSolverParams, LinearSolverIgnoreConvergenceFailure, false);
-SET_BOOL_PROP(FlowIstlSolverParams, UseAmg, false);
+SET_BOOL_PROP(FlowIstlSolverParams, UseAmg, true);
 SET_BOOL_PROP(FlowIstlSolverParams, UseCpr, false);
 SET_TYPE_PROP(FlowIstlSolverParams, LinearSolverBackend, Opm::ISTLSolverEbos<TypeTag>);
 SET_BOOL_PROP(FlowIstlSolverParams, PreconditionerAddWellContributions, false);
