@@ -794,8 +794,10 @@ public:
 
     virtual void apply (Domain& v, const Range& d)
     {
-	apply_(v,d);
-	apply_(v,d);
+	Domain v_(v.size());
+	v_=0;
+	apply_(v_,d);
+	apply_(v,v_);
     }
 
     template <class V>
