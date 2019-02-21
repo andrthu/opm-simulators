@@ -794,10 +794,11 @@ public:
 
     virtual void apply (Domain& v, const Range& d)
     {
-	Domain v_(v.size());
-	v_=0;
-	apply_(v_,d);
-	apply_(v,v_);
+	Range d_(d);
+	apply_(v, d);
+	comm_->copyOwnerToAll(v, d_);
+	v=0;
+	apply_(v, d_);
     }
 
     template <class V>
