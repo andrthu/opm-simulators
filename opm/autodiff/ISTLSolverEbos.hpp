@@ -218,7 +218,7 @@ public:
 	y=0;
 
 	auto first_row = A_.begin();
-	for (auto row = first_row; std::distance(first_row, row) < interiorSize_; ++row)
+	for (auto row = first_row; first_row.distanceTo(row) < interiorSize_; ++row)
 	{
 	    auto endc = (*row).end();
 	    for (auto col = (*row).begin(); col != endc; ++col)
@@ -233,7 +233,7 @@ public:
     virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
     {
 	auto first_row = A_.begin();
-	for (auto row = first_row; std::distance(first_row, row) < interiorSize_; ++row)
+	for (auto row = first_row; first_row.distanceTo(row) < interiorSize_; ++row)
 	{
 	    auto endc = (*row).end();
 	    for (auto col = (*row).begin(); col != endc; ++col)
@@ -255,7 +255,7 @@ protected:
     const matrix_type& A_for_precond_ ;
     const WellModel& wellMod_;
     std::unique_ptr< communication_type > comm_;
-    size_t interiorSize_;
+    int interiorSize_;
 };
 
 template<class X, class C>
@@ -371,9 +371,12 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
             //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
 	    detail::findOverlapAndInterior(simulator_.vanguard().grid(), overlapRowAndColumns_, interiorRowAndColumns_);
-	    interiorSize_ = interiorRowAndColumns_.size();
-
+	    if (simulator_.vanguard().grid().comm().size() > 1)
+		interiorSize_ = interiorRowAndColumns_.size();
+	    else
+		interiorSize_ = simulator_.vanguard().grid().numCells();
 	    noGhostAdjecency();
+
 	    setGhostsInNoGhost(*noGhost_);
         }
 
@@ -400,15 +403,12 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 
             if( isParallel() )
             {
-                typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 
-                //auto ebosJacIgnoreOverlap = Matrix(*matrix_);
-                //remove ghost rows in local matrix
-                //makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
                 copyJacToNoGhost(*matrix_,*noGhost_);
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
-                Operator opA(*noGhost_, *noGhost_, wellModel,
+                Operator opA(*noGhost_, *noGhost_, wellModel, interiorSize_,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -456,17 +456,9 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
             auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
 #else
-            //typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
-            //typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-            //SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
 	    typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
             SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
-
-	    //typedef GhostLastScalarProduct<Vector, POrComm, useSeqCat> GLSP;
-
-	    //typedef std::unique_ptr< GLSP >  SPPointer;
-	    //SPPointer sp(new GLSP(parallelInformation_arg, interiorSize_));
 #endif
 
             // Communicate if parallel.
