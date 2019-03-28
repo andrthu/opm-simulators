@@ -1110,7 +1110,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         mutable bool converged_;
         boost::any parallelInformation_;
         bool isIORank_;
-        const Matrix *matrix_;
+        std::unique_ptr<Matrix> matrix_;
 	std::unique_ptr<Matrix> noGhost_;
 
         //std::unique_ptr<Matrix> matrix_;
