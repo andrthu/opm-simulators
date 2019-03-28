@@ -1110,8 +1110,10 @@ protected:
                                                   detail::IsPositiveFunctor() );
                     break;
                 default:
-		    detail::ghost_last_bilu0_decomposition(*ILU, interiorSize_);
-                    //bilu0_decomposition( *ILU );
+		    if (useInteriorSize_)
+			detail::ghost_last_bilu0_decomposition(*ILU, interiorSize_);
+		    else
+			bilu0_decomposition( *ILU );
                     break;
                 }
             }
