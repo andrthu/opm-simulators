@@ -19,6 +19,7 @@
   along with OPM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <opm/simulators/DeferredLoggingErrorHelpers.hpp>
 
 namespace Opm
 {
@@ -330,7 +331,7 @@ namespace Opm
     template<typename TypeTag>
     double
     WellInterface<TypeTag>::
-    mostStrictBhpFromBhpLimits() const
+    mostStrictBhpFromBhpLimits(Opm::DeferredLogger& deferred_logger) const
     {
         double bhp;
 
@@ -343,7 +344,7 @@ namespace Opm
             bhp = -std::numeric_limits<double>::max();
             break;
         default:
-            OPM_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name());
+            OPM_DEFLOG_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name(), deferred_logger);
         }
 
         // The number of the well controls/constraints
@@ -367,7 +368,7 @@ namespace Opm
                     }
                     break;
                 default:
-                    OPM_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name());
+                    OPM_DEFLOG_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name(), deferred_logger);
                 } // end of switch
             }
         }
@@ -393,13 +394,13 @@ namespace Opm
     template<typename TypeTag>
     double
     WellInterface<TypeTag>::
-    getTHPConstraint() const
+    getTHPConstraint(Opm::DeferredLogger& deferred_logger) const
     {
         const int thp_control_index = getTHPControlIndex();
 
         if (thp_control_index < 0) {
-            OPM_THROW(std::runtime_error, " there is no THP constraint/limit for well " << name()
-                                          << ", while we are requesting it ");
+            OPM_DEFLOG_THROW(std::runtime_error, " there is no THP constraint/limit for well " << name()
+                                          << ", while we are requesting it ", deferred_logger);
         }
 
         return well_controls_iget_target(well_controls_, thp_control_index);
@@ -508,8 +509,8 @@ namespace Opm
         }
 
         if (updated_control_index != old_control_index) { //  || well_collection_->groupControlActive()) {
-            updateWellStateWithTarget(ebos_simulator, well_state);
-            updatePrimaryVariables(well_state);
+            updateWellStateWithTarget(ebos_simulator, well_state, deferred_logger);
+            updatePrimaryVariables(well_state, deferred_logger);
         }
     }
 
@@ -520,7 +521,7 @@ namespace Opm
     template<typename TypeTag>
     bool
     WellInterface<TypeTag>::
-    underPredictionMode() const
+    underPredictionMode(Opm::DeferredLogger& deferred_logger) const
     {
         bool under_prediction_mode = false;
 
@@ -532,7 +533,7 @@ namespace Opm
             under_prediction_mode = well_ecl_->getInjectionProperties(current_step_).predictionMode;
             break;
         default:
-            OPM_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name());
+            OPM_DEFLOG_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name(), deferred_logger);
         }
 
         return under_prediction_mode;
@@ -546,7 +547,8 @@ namespace Opm
     bool
     WellInterface<TypeTag>::
     checkRateEconLimits(const WellEconProductionLimits& econ_production_limits,
-                        const WellState& well_state) const
+                        const WellState& well_state,
+                        Opm::DeferredLogger& deferred_logger) const
     {
         const Opm::PhaseUsage& pu = phaseUsage();
         const int np = number_of_phases_;
@@ -582,7 +584,7 @@ namespace Opm
         }
 
         if (econ_production_limits.onMinReservoirFluidRate()) {
-            OpmLog::warning("NOT_SUPPORTING_MIN_RESERVOIR_FLUID_RATE", "Minimum reservoir fluid production rate limit is not supported yet");
+            deferred_logger.warning("NOT_SUPPORTING_MIN_RESERVOIR_FLUID_RATE", "Minimum reservoir fluid production rate limit is not supported yet");
         }
 
         return false;
@@ -683,7 +685,8 @@ namespace Opm
     typename WellInterface<TypeTag>::RatioCheckTuple
     WellInterface<TypeTag>::
     checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits,
-                         const WellState& well_state) const
+                         const WellState& well_state,
+                         Opm::DeferredLogger& deferred_logger) const
     {
         // TODO: not sure how to define the worst-offending completion when more than one
         //       ratio related limit is violated.
@@ -711,15 +714,15 @@ namespace Opm
         }
 
         if (econ_production_limits.onMaxGasOilRatio()) {
-            OpmLog::warning("NOT_SUPPORTING_MAX_GOR", "the support for max Gas-Oil ratio is not implemented yet!");
+            deferred_logger.warning("NOT_SUPPORTING_MAX_GOR", "the support for max Gas-Oil ratio is not implemented yet!");
         }
 
         if (econ_production_limits.onMaxWaterGasRatio()) {
-            OpmLog::warning("NOT_SUPPORTING_MAX_WGR", "the support for max Water-Gas ratio is not implemented yet!");
+            deferred_logger.warning("NOT_SUPPORTING_MAX_WGR", "the support for max Water-Gas ratio is not implemented yet!");
         }
 
         if (econ_production_limits.onMaxGasLiquidRatio()) {
-            OpmLog::warning("NOT_SUPPORTING_MAX_GLR", "the support for max Gas-Liquid ratio is not implemented yet!");
+            deferred_logger.warning("NOT_SUPPORTING_MAX_GLR", "the support for max Gas-Liquid ratio is not implemented yet!");
         }
 
         if (any_limit_violated) {
@@ -740,8 +743,10 @@ namespace Opm
     updateWellTestState(const WellState& well_state,
                         const double& simulationTime,
                         const bool& writeMessageToOPMLog,
-                        WellTestState& wellTestState) const
+                        WellTestState& wellTestState,
+                        Opm::DeferredLogger& deferred_logger) const
     {
+
         // currently, we only updateWellTestState for producers
         if (wellType() != PRODUCER) {
             return;
@@ -749,15 +754,15 @@ namespace Opm
 
         // Based on current understanding, only under prediction mode, we need to shut well due to various
         // reasons or limits. With more knowlage or testing cases later, this might need to be corrected.
-        if (!underPredictionMode() ) {
+        if (!underPredictionMode(deferred_logger) ) {
             return;
         }
 
         // updating well test state based on physical (THP/BHP) limits.
-        updateWellTestStatePhysical(well_state, simulationTime, writeMessageToOPMLog, wellTestState);
+        updateWellTestStatePhysical(well_state, simulationTime, writeMessageToOPMLog, wellTestState, deferred_logger);
 
         // updating well test state based on Economic limits.
-        updateWellTestStateEconomic(well_state, simulationTime, writeMessageToOPMLog, wellTestState);
+        updateWellTestStateEconomic(well_state, simulationTime, writeMessageToOPMLog, wellTestState, deferred_logger);
 
         // TODO: well can be shut/closed due to other reasons
     }
@@ -772,7 +777,8 @@ namespace Opm
     updateWellTestStatePhysical(const WellState& well_state,
                                 const double simulation_time,
                                 const bool write_message_to_opmlog,
-                                WellTestState& well_test_state) const
+                                WellTestState& well_test_state,
+                                Opm::DeferredLogger& deferred_logger) const
     {
         if (!isOperable()) {
             well_test_state.addClosedWell(name(), WellTestConfig::Reason::PHYSICAL, simulation_time);
@@ -780,7 +786,7 @@ namespace Opm
                 // TODO: considering auto shut in?
                 const std::string msg = "well " + name()
                              + std::string(" will be shut as it can not operate under current reservoir condition");
-                OpmLog::info(msg);
+                deferred_logger.info(msg);
             }
         }
 
@@ -796,7 +802,8 @@ namespace Opm
     updateWellTestStateEconomic(const WellState& well_state,
                                 const double simulation_time,
                                 const bool write_message_to_opmlog,
-                                WellTestState& well_test_state) const
+                                WellTestState& well_test_state,
+                                Opm::DeferredLogger& deferred_logger) const
     {
         const WellEconProductionLimits& econ_production_limits = well_ecl_->getEconProductionLimits(current_step_);
 
@@ -814,11 +821,11 @@ namespace Opm
         if (quantity_limit == WellEcon::POTN) {
             const std::string msg = std::string("POTN limit for well ") + name() + std::string(" is not supported for the moment. \n")
                                   + std::string("All the limits will be evaluated based on RATE. ");
-            OpmLog::warning("NOT_SUPPORTING_POTN", msg);
+            deferred_logger.warning("NOT_SUPPORTING_POTN", msg);
         }
 
         if (econ_production_limits.onAnyRateLimit()) {
-            rate_limit_violated = checkRateEconLimits(econ_production_limits, well_state);
+            rate_limit_violated = checkRateEconLimits(econ_production_limits, well_state, deferred_logger);
         }
 
         if (rate_limit_violated) {
@@ -827,21 +834,21 @@ namespace Opm
                                                   + std::string("is not supported yet \n")
                                                   + std::string("the program will keep running after ") + name()
                                                   + std::string(" is closed");
-                OpmLog::warning("NOT_SUPPORTING_ENDRUN", warning_message);
+                deferred_logger.warning("NOT_SUPPORTING_ENDRUN", warning_message);
             }
 
             if (econ_production_limits.validFollowonWell()) {
-                OpmLog::warning("NOT_SUPPORTING_FOLLOWONWELL", "opening following on well after well closed is not supported yet");
+                deferred_logger.warning("NOT_SUPPORTING_FOLLOWONWELL", "opening following on well after well closed is not supported yet");
             }
 
             well_test_state.addClosedWell(name(), WellTestConfig::Reason::ECONOMIC, simulation_time);
             if (write_message_to_opmlog) {
                 if (well_ecl_->getAutomaticShutIn()) {
                     const std::string msg = std::string("well ") + name() + std::string(" will be shut due to rate economic limit");
-                    OpmLog::info(msg);
+                    deferred_logger.info(msg);
                 } else {
                     const std::string msg = std::string("well ") + name() + std::string(" will be stopped due to rate economic limit");
-                    OpmLog::info(msg);
+                    deferred_logger.info(msg);
                 }
             }
             // the well is closed, not need to check other limits
@@ -853,7 +860,7 @@ namespace Opm
         RatioCheckTuple ratio_check_return;
 
         if (econ_production_limits.onAnyRatioLimit()) {
-            ratio_check_return = checkRatioEconLimits(econ_production_limits, well_state);
+            ratio_check_return = checkRatioEconLimits(econ_production_limits, well_state, deferred_logger);
             ratio_limits_violated = std::get<0>(ratio_check_return);
         }
 
@@ -869,11 +876,11 @@ namespace Opm
                         if (worst_offending_completion < 0) {
                             const std::string msg = std::string("Connection ") + std::to_string(- worst_offending_completion)
                                     + std::string(" for well ") + name() + std::string(" will be closed due to economic limit");
-                            OpmLog::info(msg);
+                            deferred_logger.info(msg);
                         } else {
                             const std::string msg = std::string("Completion ") + std::to_string(worst_offending_completion)
                                     + std::string(" for well ") + name() + std::string(" will be closed due to economic limit");
-                            OpmLog::info(msg);
+                            deferred_logger.info(msg);
                         }
                     }
 
@@ -890,10 +897,10 @@ namespace Opm
                         if (write_message_to_opmlog) {
                             if (well_ecl_->getAutomaticShutIn()) {
                                 const std::string msg = name() + std::string(" will be shut due to last completion closed");
-                            	OpmLog::info(msg);
+                            	deferred_logger.info(msg);
                             } else {
                                 const std::string msg = name() + std::string(" will be stopped due to last completion closed");
-                                OpmLog::info(msg);
+                                deferred_logger.info(msg);
                             }
                         }
                     }
@@ -906,10 +913,10 @@ namespace Opm
                     if (well_ecl_->getAutomaticShutIn()) {
                         // tell the controll that the well is closed
                         const std::string msg = name() + std::string(" will be shut due to ratio economic limit");
-                        OpmLog::info(msg);
+                        deferred_logger.info(msg);
                     } else {
                         const std::string msg = name() + std::string(" will be stopped due to ratio economic limit");
-                        OpmLog::info(msg);
+                        deferred_logger.info(msg);
                     }
                 }
                     break;
@@ -918,7 +925,7 @@ namespace Opm
                     break;
                 default:
                 {
-                    OpmLog::warning("NOT_SUPPORTED_WORKOVER_TYPE",
+                    deferred_logger.warning("NOT_SUPPORTED_WORKOVER_TYPE",
                                     "not supporting workover type " + WellEcon::WorkoverEnumToString(workover) );
                 }
             }
@@ -965,7 +972,7 @@ namespace Opm
 
         WellState well_state_copy = well_state;
 
-        updatePrimaryVariables(well_state_copy);
+        updatePrimaryVariables(well_state_copy, deferred_logger);
         initPrimaryVariablesEvaluation();
 
         // create a well
@@ -978,7 +985,7 @@ namespace Opm
         while (testWell) {
             const size_t original_number_closed_completions = welltest_state_temp.sizeCompletions();
             solveWellForTesting(simulator, well_state_copy, B_avg, deferred_logger);
-            updateWellTestState(well_state_copy, simulation_time, /*writeMessageToOPMLog=*/ false, welltest_state_temp);
+            updateWellTestState(well_state_copy, simulation_time, /*writeMessageToOPMLog=*/ false, welltest_state_temp, deferred_logger);
             closeCompletions(welltest_state_temp);
 
             // Stop testing if the well is closed or shut due to all completions shut
@@ -995,7 +1002,7 @@ namespace Opm
         if (!welltest_state_temp.hasWell(name(), WellTestConfig::Reason::ECONOMIC)) {
             welltest_state.openWell(name());
             const std::string msg = std::string("well ") + name() + std::string(" is re-opened");
-            OpmLog::info(msg);
+            deferred_logger.info(msg);
 
             // also reopen completions
             for (auto& completion : well_ecl_->getCompletions(report_step)) {
@@ -1014,7 +1021,9 @@ namespace Opm
     void
     WellInterface<TypeTag>::
     computeRepRadiusPerfLength(const Grid& grid,
-                               const std::vector<int>& cartesian_to_compressed)
+                               const std::vector<int>& cartesian_to_compressed,
+                               Opm::DeferredLogger& deferred_logger
+                               )
     {
         const int* cart_dims = Opm::UgGridHelpers::cartDims(grid);
         auto cell_to_faces = Opm::UgGridHelpers::cell2Faces(grid);
@@ -1044,8 +1053,8 @@ namespace Opm
                 const int cell = cartesian_to_compressed[cart_grid_indx];
 
                 if (cell < 0) {
-                    OPM_THROW(std::runtime_error, "Cell with i,j,k indices " << i << ' ' << j << ' '
-                              << k << " not found in grid (well = " << name() << ')');
+                    OPM_DEFLOG_THROW(std::runtime_error, "Cell with i,j,k indices " << i << ' ' << j << ' '
+                              << k << " not found in grid (well = " << name() << ')', deferred_logger);
                 }
 
                 {
@@ -1070,7 +1079,7 @@ namespace Opm
                             perf_length = cubical[2];
                             break;
                         default:
-                            OPM_THROW(std::runtime_error, " Dirtecion of well is not supported ");
+                            OPM_DEFLOG_THROW(std::runtime_error, " Dirtecion of well is not supported ", deferred_logger);
                     }
 
                     const double repR = std::sqrt(re * radius);
@@ -1120,7 +1129,7 @@ namespace Opm
 
     template<typename TypeTag>
     bool
-    WellInterface<TypeTag>::isVFPActive() const
+    WellInterface<TypeTag>::isVFPActive(Opm::DeferredLogger& deferred_logger) const
     {
         // since the well_controls only handles the VFP number when THP constraint/target is there.
         // we need to get the table number through the parser, in case THP constraint/target is not there.
@@ -1135,8 +1144,8 @@ namespace Opm
                 if (vfp_properties_->getProd()->hasTable(table_id)) {
                     return true;
                 } else {
-                    OPM_THROW(std::runtime_error, "VFPPROD table " << std::to_string(table_id) << " is specfied,"
-                              << " for well " << name() << ", while we could not access it during simulation");
+                    OPM_DEFLOG_THROW(std::runtime_error, "VFPPROD table " << std::to_string(table_id) << " is specfied,"
+                              << " for well " << name() << ", while we could not access it during simulation", deferred_logger);
                 }
             }
 
@@ -1148,8 +1157,8 @@ namespace Opm
                 if (vfp_properties_->getInj()->hasTable(table_id)) {
                     return true;
                 } else {
-                    OPM_THROW(std::runtime_error, "VFPINJ table " << std::to_string(table_id) << " is specfied,"
-                              << " for well " << name() << ", while we could not access it during simulation");
+                    OPM_DEFLOG_THROW(std::runtime_error, "VFPINJ table " << std::to_string(table_id) << " is specfied,"
+                              << " for well " << name() << ", while we could not access it during simulation", deferred_logger);
                 }
             }
         }
@@ -1173,16 +1182,17 @@ namespace Opm
         bool converged;
         WellState well_state0 = well_state;
         do {
-            assembleWellEq(ebosSimulator, dt, well_state);
+            assembleWellEq(ebosSimulator, dt, well_state, deferred_logger);
 
-            auto report = getWellConvergence(B_avg);
+            auto report = getWellConvergence(B_avg, deferred_logger);
+
             converged = report.converged();
             if (converged) {
                 break;
             }
 
             ++it;
-            solveEqAndUpdateWellState(well_state);
+            solveEqAndUpdateWellState(well_state, deferred_logger);
 
             updateWellControl(ebosSimulator, well_state, deferred_logger);
             initPrimaryVariablesEvaluation();
@@ -1252,16 +1262,12 @@ namespace Opm
 
     template<typename TypeTag>
     void
-    WellInterface<TypeTag>::scaleProductivityIndex(const int perfIdx, double& productivity_index)
+    WellInterface<TypeTag>::scaleProductivityIndex(const int perfIdx, double& productivity_index, const bool new_well, Opm::DeferredLogger& deferred_logger)
     {
-
         const auto& connection = well_ecl_->getConnections(current_step_)[perfIdx];
-
-        const bool new_well = well_ecl_->hasEvent(ScheduleEvents::NEW_WELL , current_step_);
-
         if (well_ecl_->getDrainageRadius(current_step_) < 0) {
             if (new_well && perfIdx == 0) {
-                OpmLog::warning("PRODUCTIVITY_INDEX_WARNING", "Negative drainage radius not supported. The productivity index is set to zero");
+                deferred_logger.warning("PRODUCTIVITY_INDEX_WARNING", "Negative drainage radius not supported. The productivity index is set to zero");
             }
             productivity_index = 0.0;
             return;
@@ -1269,7 +1275,7 @@ namespace Opm
 
         if (connection.r0() > well_ecl_->getDrainageRadius(current_step_)) {
             if (new_well && well_productivity_index_logger_counter_ < 1) {
-                OpmLog::info("PRODUCTIVITY_INDEX_INFO", "The effective radius is larger than the well drainage radius for well " + name() +
+                deferred_logger.info("PRODUCTIVITY_INDEX_INFO", "The effective radius is larger than the well drainage radius for well " + name() +
                              " They are set to equal in the well productivity index calculations");
                 well_productivity_index_logger_counter_++;
             }
@@ -1310,6 +1316,7 @@ namespace Opm
                 return connectionRates_[perfIdx][activeCompIdx].value();
             }
         }
+        // this is not thread safe
         OPM_THROW(std::invalid_argument, "The well with name " + name()
                   + " does not perforate cell " + std::to_string(cellIdx));
         return 0.0;
