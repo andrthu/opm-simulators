@@ -68,11 +68,17 @@ NEW_PROP_TAG(EnableOpmRstFile);
 NEW_PROP_TAG(EclStrictParsing);
 NEW_PROP_TAG(EclOutputInterval);
 NEW_PROP_TAG(IgnoreKeywords);
+NEW_PROP_TAG(UseObjWgt);
+NEW_PROP_TAG(ReorderLocalMethod);
+NEW_PROP_TAG(EdgeWeightsMethod);
 
 SET_STRING_PROP(EclBaseVanguard, IgnoreKeywords, "");
 SET_STRING_PROP(EclBaseVanguard, EclDeckFileName, "");
 SET_INT_PROP(EclBaseVanguard, EclOutputInterval, -1); // use the deck-provided value
 SET_BOOL_PROP(EclBaseVanguard, EnableOpmRstFile, false);
+SET_BOOL_PROP(EclBaseVanguard, UseObjWgt, false);
+SET_INT_PROP(EclBaseVanguard, EdgeWeightsMethod, 1);
+SET_INT_PROP(EclBaseVanguard, ReorderLocalMethod, 1);
 SET_BOOL_PROP(EclBaseVanguard, EclStrictParsing, false);
 
 END_PROPERTIES
@@ -113,6 +119,12 @@ public:
                              "Include OPM-specific keywords in the ECL restart file to enable restart of OPM simulators from these files");
         EWOMS_REGISTER_PARAM(TypeTag, std::string, IgnoreKeywords,
                              "List of Eclipse keywords which should be ignored. As a ':' separated string.");
+        EWOMS_REGISTER_PARAM(TypeTag, bool, UseObjWgt,
+                             "Use vertex weights in the load balancer.");
+        EWOMS_REGISTER_PARAM(TypeTag, int, EdgeWeightsMethod,
+                             "Choose edge-weighing strategy: 0=uniform, 1=trans, 2=log(trans).");
+        EWOMS_REGISTER_PARAM(TypeTag, int, ReorderLocalMethod,
+                             "Choose method for reordering after partitioning: 0=noReorder, 1=ghostLast");
         EWOMS_REGISTER_PARAM(TypeTag, bool, EclStrictParsing,
                              "Use strict mode for parsing - all errors are collected before the applicaton exists.");
     }
@@ -192,6 +204,9 @@ public:
         MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 #endif
 
+        useObjWgt_ = EWOMS_GET_PARAM(TypeTag, bool, UseObjWgt);
+        edgeWeightsMethod_ = EWOMS_GET_PARAM(TypeTag, int, EdgeWeightsMethod);
+        reorderLocalMethod_ = EWOMS_GET_PARAM(TypeTag, int, ReorderLocalMethod);
         std::string fileName = EWOMS_GET_PARAM(TypeTag, std::string, EclDeckFileName);
 
         if (fileName == "")
@@ -320,6 +335,33 @@ public:
 
     Opm::Deck& deck()
     { return *deck_; }
+
+    /*!
+     * \brief Use transmissibility edge-weights or not in loadbalancer.
+     */
+    const bool useObjWgt() const
+    { return useObjWgt_; }
+
+    bool useObjWgt()
+    { return useObjWgt_; }
+    
+    /*!
+     * \brief Parameter deciding the edge-weight strategy of the load balancer.
+     */
+    int edgeWeightsMethod() const
+    { return edgeWeightsMethod_; }
+
+    int edgeWeightsMethod()
+    { return edgeWeightsMethod_; }
+
+    /*!
+     * \brief Parameter deciding method for local reordering.
+     */
+    int reorderLocalMethod() const
+    { return reorderLocalMethod_; }
+
+    int reorderLocalMethod()
+    { return reorderLocalMethod_; }
 
     /*!
      * \brief Return a reference to the internalized ECL deck.
@@ -500,6 +542,10 @@ private:
 
     Opm::Schedule* eclSchedule_;
     Opm::SummaryConfig* eclSummaryConfig_;
+
+    bool useObjWgt_;
+    int edgeWeightsMethod_;
+    int reorderLocalMethod_;
 };
 
 template <class TypeTag>
