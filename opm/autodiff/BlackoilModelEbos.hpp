@@ -69,7 +69,7 @@
 
 BEGIN_PROPERTIES
 
-NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowIstlSolver, FlowModelParameters, FlowTimeSteppingParameters));
+NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowModelParameters, FlowTimeSteppingParameters));
 SET_STRING_PROP(EclFlowProblem, OutputDir, "");
 SET_BOOL_PROP(EclFlowProblem, EnableDebuggingChecks, false);
 // default in flow is to formulate the equations in surface volumes
@@ -246,7 +246,7 @@ namespace Opm {
             report.total_linearizations = 1;
 
             try {
-                report += assemble(timer, iteration);
+                report += assembleReservoir(timer, iteration);
                 report.assemble_time += perfTimer.stop();
             }
             catch (...) {
@@ -292,6 +292,11 @@ namespace Opm {
                 // Compute the nonlinear update.
                 const int nc = UgGridHelpers::numCells(grid_);
                 BVector x(nc);
+
+                // apply the Schur compliment of the well model to the reservoir linearized
+                // equations
+                wellModel().linearize(ebosSimulator().model().linearizer().jacobian(),
+                                      ebosSimulator().model().linearizer().residual());
 
                 try {
                     solveJacobianSystem(x);
@@ -360,13 +365,13 @@ namespace Opm {
         /// \param[in]      reservoir_state   reservoir state variables
         /// \param[in, out] well_state        well state variables
         /// \param[in]      initial_assembly  pass true if this is the first call to assemble() in this timestep
-        SimulatorReport assemble(const SimulatorTimerInterface& timer,
-                                 const int iterationIdx)
+        SimulatorReport assembleReservoir(const SimulatorTimerInterface& timer,
+                                          const int iterationIdx)
         {
             // -------- Mass balance equations --------
             ebosSimulator_.model().newtonMethod().setIterationIndex(iterationIdx);
             ebosSimulator_.problem().beginIteration();
-            ebosSimulator_.model().linearizer().linearize();
+            ebosSimulator_.model().linearizer().linearizeDomain();
             ebosSimulator_.problem().endIteration();
 
             return wellModel().lastReport();
@@ -463,31 +468,18 @@ namespace Opm {
 
             auto& ebosJac = ebosSimulator_.model().linearizer().jacobian();
             auto& ebosResid = ebosSimulator_.model().linearizer().residual();
-            // J = [A, B; C, D], where A is the reservoir equations, B and C the interaction of well
-            // with the reservoir and D is the wells itself.
-            // The full system is reduced to a number of cells X number of cells system via Schur complement
-            // A -= B^T D^-1 C
-            // If matrix_add_well_contribution is false, the Ax operator is modified. i.e Ax -= B^T D^-1 C x in the WellModelMatrixAdapter
-            // instead of A.
-            // The residual is modified similarly.
-            // r = [r, r_well], where r is the residual and r_well the well residual.
-            // r -= B^T * D^-1 r_well
-            wellModel().apply(ebosResid);
-            if (param_.matrix_add_well_contributions_) {
-                wellModel().addWellContributions(ebosJac.istlMatrix());
-            }
 
             // set initial guess
             x = 0.0;
 
             auto& ebosSolver = ebosSimulator_.model().newtonMethod().linearSolver();
-            ebosSolver.prepare(ebosJac);
+            ebosSolver.prepare(ebosJac, ebosResid);
             ebosSolver.setResidual(ebosResid);
             // actually, the error needs to be calculated after setResidual in order to
             // account for parallelization properly. since the residual of ECFV
             // discretizations does not need to be synchronized across processes to be
             // consistent, this is not relevant for OPM-flow...
-            ebosSolver.setJacobian(ebosJac);
+            ebosSolver.setMatrix(ebosJac);
             ebosSolver.solve(x);
        }
 
