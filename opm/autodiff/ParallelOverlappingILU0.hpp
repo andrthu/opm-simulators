@@ -434,8 +434,7 @@ namespace Opm
 	typedef typename M::block_type block;
 
 	// implement left looking variant with stored inverse
-	rowiterator endi=A.end();
-	rowiterator begini = A.begin(); 
+	rowiterator begini = A.begin();
 	for (rowiterator i = begini; begini.distanceTo(i) < interiorSize; ++i)
 	{
 	    // coliterator is diagonal after the following loop
@@ -958,7 +957,7 @@ public:
 
           for( size_type col = rowI; col < rowINext; ++ col )
           {
-            lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
+              lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
           }
 
           mv[ i ] = rhs;  // Lii = I
@@ -972,9 +971,9 @@ public:
 	    const size_type rowINext = upper_.rows_[ i+1 ];
 	    
 	    for( size_type col = rowI; col < rowINext; ++ col )
-	     {
-		 upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
-	     }
+	    {
+	        upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
+	    }
 	    
 	    // apply inverse and store result
 	    inv_[ i ].mv( rhs, vBlock);
