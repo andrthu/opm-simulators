@@ -398,9 +398,9 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 		interiorSize_ = interiorRowAndColumns_.size();
 	    else
 		interiorSize_ = simulator_.vanguard().grid().numCells();
-	    noGhostAdjecency();
+	    //noGhostAdjecency();
 
-	    setGhostsInNoGhost(*noGhost_);
+	    //setGhostsInNoGhost(*noGhost_);
         }
 
         // nothing to clean here

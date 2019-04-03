@@ -161,6 +161,11 @@ public:
             int edgeWeightsMethod = this->edgeWeightsMethod();
             int reorderLocalMethod = this->reorderLocalMethod();
 
+            double cat1 = this->categoryFirst();
+            double cat2 = this->categorySecond();
+            double cat3 = this->categoryThird();
+            std::vector<double> catWeights = {cat1, cat2, cat3};
+
             // convert to transmissibility for faces
             // TODO: grid_->numFaces() is not generic. use grid_->size(1) instead? (might
             // not work)
@@ -196,7 +201,7 @@ public:
             //distribute the grid and switch to the distributed view.
             {
                 const auto wells = this->schedule().getWells();
-                defunctWellNames_ = std::get<1>(grid_->loadBalance(&wells, faceTrans.data(), edgeWeightsMethod, useObjWgt, reorderLocalMethod, 1));
+                defunctWellNames_ = std::get<1>(grid_->loadBalance(&wells, faceTrans.data(), edgeWeightsMethod, useObjWgt, reorderLocalMethod, catWeights, 1));
             }
             grid_->switchToDistributedView();
 

@@ -71,6 +71,9 @@ NEW_PROP_TAG(IgnoreKeywords);
 NEW_PROP_TAG(UseObjWgt);
 NEW_PROP_TAG(ReorderLocalMethod);
 NEW_PROP_TAG(EdgeWeightsMethod);
+NEW_PROP_TAG(CategoryFirst);
+NEW_PROP_TAG(CategorySecond);
+NEW_PROP_TAG(CategoryThird);
 
 SET_STRING_PROP(EclBaseVanguard, IgnoreKeywords, "");
 SET_STRING_PROP(EclBaseVanguard, EclDeckFileName, "");
@@ -79,6 +82,9 @@ SET_BOOL_PROP(EclBaseVanguard, EnableOpmRstFile, false);
 SET_BOOL_PROP(EclBaseVanguard, UseObjWgt, false);
 SET_INT_PROP(EclBaseVanguard, EdgeWeightsMethod, 1);
 SET_INT_PROP(EclBaseVanguard, ReorderLocalMethod, 1);
+SET_SCALAR_PROP(EclBaseVanguard, CategoryFirst, 1.0);
+SET_SCALAR_PROP(EclBaseVanguard, CategorySecond, 10.0);
+SET_SCALAR_PROP(EclBaseVanguard, CategoryThird, 100.0);
 SET_BOOL_PROP(EclBaseVanguard, EclStrictParsing, false);
 
 END_PROPERTIES
@@ -125,6 +131,12 @@ public:
                              "Choose edge-weighing strategy: 0=uniform, 1=trans, 2=log(trans).");
         EWOMS_REGISTER_PARAM(TypeTag, int, ReorderLocalMethod,
                              "Choose method for reordering after partitioning: 0=noReorder, 1=ghostLast");
+        EWOMS_REGISTER_PARAM(TypeTag, double, CategoryFirst,
+                             "Weigt of category when using EdgeWeightsMethod=4");
+        EWOMS_REGISTER_PARAM(TypeTag, double, CategorySecond,
+                             "Weigt of category when using EdgeWeightsMethod=4");
+        EWOMS_REGISTER_PARAM(TypeTag, double, CategoryThird,
+                             "Weigt of category when using EdgeWeightsMethod=4");
         EWOMS_REGISTER_PARAM(TypeTag, bool, EclStrictParsing,
                              "Use strict mode for parsing - all errors are collected before the applicaton exists.");
     }
@@ -204,9 +216,12 @@ public:
         MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 #endif
 
-        useObjWgt_ = EWOMS_GET_PARAM(TypeTag, bool, UseObjWgt);
-        edgeWeightsMethod_ = EWOMS_GET_PARAM(TypeTag, int, EdgeWeightsMethod);
-        reorderLocalMethod_ = EWOMS_GET_PARAM(TypeTag, int, ReorderLocalMethod);
+        useObjWgt_           = EWOMS_GET_PARAM(TypeTag, bool, UseObjWgt);
+        edgeWeightsMethod_   = EWOMS_GET_PARAM(TypeTag, int, EdgeWeightsMethod);
+        reorderLocalMethod_  = EWOMS_GET_PARAM(TypeTag, int, ReorderLocalMethod);
+        categoryFirst_       = EWOMS_GET_PARAM(TypeTag, double, CategoryFirst);
+        categorySecond_      = EWOMS_GET_PARAM(TypeTag, double, CategorySecond);
+        categoryThird_       = EWOMS_GET_PARAM(TypeTag, double, CategoryThird);
         std::string fileName = EWOMS_GET_PARAM(TypeTag, std::string, EclDeckFileName);
 
         if (fileName == "")
@@ -362,6 +377,33 @@ public:
 
     int reorderLocalMethod()
     { return reorderLocalMethod_; }
+
+    /*!
+     * \brief Parameter deciding category weight.
+     */
+    int categoryFirst() const
+    { return categoryFirst_; }
+
+    int categoryFirst()
+    { return categoryFirst_; }
+
+    /*!
+     * \brief Parameter deciding category weight.
+     */
+    int categorySecond() const
+    { return categorySecond_; }
+
+    int categorySecond()
+    { return categorySecond_; }
+
+    /*!
+     * \brief Parameter deciding category weight.
+     */
+    int categoryThird() const
+    { return categoryThird_; }
+
+    int categoryThird()
+    { return categoryThird_; }
 
     /*!
      * \brief Return a reference to the internalized ECL deck.
@@ -546,6 +588,9 @@ private:
     bool useObjWgt_;
     int edgeWeightsMethod_;
     int reorderLocalMethod_;
+    double categoryFirst_;
+    double categorySecond_;
+    double categoryThird_;
 };
 
 template <class TypeTag>

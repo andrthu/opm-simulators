@@ -858,6 +858,7 @@ public:
                              bool reorder_sphere=true)
         : ParallelOverlappingILU0( A, 0, w, milu, redblack, reorder_sphere )
     {
+	useInteriorSize_ = false;
     }
 
     /*! \brief Constructor.
