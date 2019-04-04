@@ -81,7 +81,7 @@ SET_INT_PROP(EclBaseVanguard, EclOutputInterval, -1); // use the deck-provided v
 SET_BOOL_PROP(EclBaseVanguard, EnableOpmRstFile, false);
 SET_BOOL_PROP(EclBaseVanguard, UseObjWgt, false);
 SET_INT_PROP(EclBaseVanguard, EdgeWeightsMethod, 1);
-SET_INT_PROP(EclBaseVanguard, ReorderLocalMethod, 1);
+SET_INT_PROP(EclBaseVanguard, ReorderLocalMethod, 5);
 SET_SCALAR_PROP(EclBaseVanguard, CategoryFirst, 1.0);
 SET_SCALAR_PROP(EclBaseVanguard, CategorySecond, 10.0);
 SET_SCALAR_PROP(EclBaseVanguard, CategoryThird, 100.0);
