@@ -801,12 +801,13 @@ public:
           comm_(nullptr), w_(w),
           relaxation_( std::abs( w - 1.0 ) > 1e-15 )
     {
+	useInteriorSize_ = false;
+	interiorSize_ = 0;
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
         init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
               reorder_sphere  );
-	useInteriorSize_ = false;
-	interiorSize_ = 0;
+	
     }
 
     /*! \brief Constructor gets all parameters to operate the prec.
@@ -834,10 +835,11 @@ public:
     {
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
-        init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
-              reorder_sphere );
-	useInteriorSize_ = false;
+        useInteriorSize_ = false;
 	interiorSize_ = 0;
+	init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
+              reorder_sphere );
+	
     }
 
     /*! \brief Constructor.
@@ -887,10 +889,10 @@ public:
     {
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
-        init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
-              reorder_sphere );
-	useInteriorSize_ = false;
+        useInteriorSize_ = false;
 	interiorSize_ = 0;
+	init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
+              reorder_sphere );
     }
 
     template<class BlockType, class Alloc>
@@ -908,9 +910,10 @@ public:
     {
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
-        init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
+        useInteriorSize_ = true;
+	init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
               reorder_sphere );
-	useInteriorSize_ = true;
+	
 	
     }
 
@@ -950,7 +953,7 @@ public:
         }
 
         // lower triangular solve
-        for( size_type i=0; i < lowerLoopEnd; ++ i )
+        for( size_type i = 0; i < lowerLoopEnd; ++ i )
         {
           dblock rhs( md[ i ] );
           const size_type rowI     = lower_.rows_[ i ];
