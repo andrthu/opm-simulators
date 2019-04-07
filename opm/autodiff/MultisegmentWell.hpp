@@ -114,14 +114,16 @@ namespace Opm
 
         virtual void assembleWellEq(const Simulator& ebosSimulator,
                                     const double dt,
-                                    WellState& well_state) override;
+                                    WellState& well_state,
+                                    Opm::DeferredLogger& deferred_logger) override;
 
         /// updating the well state based the current control mode
         virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
-                                               WellState& well_state) const override;
+                                               WellState& well_state,
+                                               Opm::DeferredLogger& deferred_logger) const override;
 
         /// check whether the well equations get converged for this well
-        virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg) const override;
+        virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg, Opm::DeferredLogger& deferred_logger) const override;
 
         /// Ax = Ax - C D^-1 B x
         virtual void apply(const BVector& x, BVector& Ax) const override;
@@ -131,19 +133,22 @@ namespace Opm
         /// using the solution x to recover the solution xw for wells and applying
         /// xw to update Well State
         virtual void recoverWellSolutionAndUpdateWellState(const BVector& x,
-                                                           WellState& well_state) const override;
+                                                           WellState& well_state,
+                                                           Opm::DeferredLogger& deferred_logger) const override;
 
         /// computing the well potentials for group control
         virtual void computeWellPotentials(const Simulator& ebosSimulator,
                                            const WellState& well_state,
-                                           std::vector<double>& well_potentials) override;
+                                           std::vector<double>& well_potentials,
+                                           Opm::DeferredLogger& deferred_logger) override;
 
-        virtual void updatePrimaryVariables(const WellState& well_state) const override;
+        virtual void updatePrimaryVariables(const WellState& well_state, Opm::DeferredLogger& deferred_logger) const override;
 
-        virtual void solveEqAndUpdateWellState(WellState& well_state) override; // const?
+        virtual void solveEqAndUpdateWellState(WellState& well_state, Opm::DeferredLogger& deferred_logger) override; // const?
 
         virtual void calculateExplicitQuantities(const Simulator& ebosSimulator,
-                                                 const WellState& well_state) override; // should be const?
+                                                 const WellState& well_state,
+                                                 Opm::DeferredLogger& deferred_logger) override; // should be const?
 
         /// number of segments for this well
         /// int number_of_segments_;
@@ -266,7 +271,8 @@ namespace Opm
         // updating the well_state based on well solution dwells
         void updateWellState(const BVectorWell& dwells,
                              const bool inner_iteration,
-                             WellState& well_state) const;
+                             WellState& well_state,
+                             Opm::DeferredLogger& deferred_logger) const;
 
         // initialize the segment rates with well rates
         // when there is no more accurate way to initialize the segment rates, we initialize
@@ -289,13 +295,15 @@ namespace Opm
         // basically Q_p / \sigma_p Q_p
         EvalWell surfaceVolumeFraction(const int seg, const int comp_idx) const;
 
-        void computePerfRate(const IntensiveQuantities& int_quants,
-                             const std::vector<EvalWell>& mob_perfcells,
-                             const int seg,
-                             const int perf,
-                             const EvalWell& segment_pressure,
-                             const bool& allow_cf,
-                             std::vector<EvalWell>& cq_s) const;
+        void computePerfRatePressure(const IntensiveQuantities& int_quants,
+                                     const std::vector<EvalWell>& mob_perfcells,
+                                     const int seg,
+                                     const int perf,
+                                     const EvalWell& segment_pressure,
+                                     const bool& allow_cf,
+                                     std::vector<EvalWell>& cq_s,
+                                     EvalWell& perf_press,
+                                     Opm::DeferredLogger& deferred_logger) const;
 
         // convert a Eval from reservoir to contain the derivative related to wells
         EvalWell extendEval(const Eval& in) const;
@@ -315,7 +323,7 @@ namespace Opm
                          const int perf,
                          std::vector<EvalWell>& mob) const;
 
-        void assembleControlEq() const;
+        void assembleControlEq(Opm::DeferredLogger& deferred_logger) const;
 
         void assemblePressureEq(const int seg) const;
 
@@ -333,7 +341,8 @@ namespace Opm
         // checking the operability of the well based on current reservoir condition
         // it is not implemented for multisegment well yet
         virtual void checkWellOperability(const Simulator& ebos_simulator,
-                                          const WellState& well_state) override;
+                                          const WellState& well_state,
+                                          Opm::DeferredLogger& deferred_logger) override;
 
         void updateWellStateFromPrimaryVariables(WellState& well_state) const;
 
@@ -344,11 +353,13 @@ namespace Opm
         // TODO: try to make ebosSimulator const, as it should be
         void iterateWellEquations(const Simulator& ebosSimulator,
                                   const double dt,
-                                  WellState& well_state);
+                                  WellState& well_state,
+                                  Opm::DeferredLogger& deferred_logger);
 
         void assembleWellEqWithoutIteration(const Simulator& ebosSimulator,
                                             const double dt,
-                                            WellState& well_state);
+                                            WellState& well_state,
+                                            Opm::DeferredLogger& deferred_logger);
 
         virtual void wellTestingPhysical(Simulator& simulator, const std::vector<double>& B_avg,
                                          const double simulation_time, const int report_step,

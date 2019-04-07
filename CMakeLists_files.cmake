@@ -50,6 +50,8 @@ list (APPEND MAIN_SOURCE_FILES
 # originally generated with the command:
 # find tests -name '*.cpp' -a ! -wholename '*/not-unit/*' -printf '\t%p\n' | sort
 list (APPEND TEST_SOURCE_FILES
+  tests/test_equil.cc
+  tests/test_ecl_output.cc
   tests/test_blackoil_amg.cpp
   tests/test_convergencereport.cpp
   tests/test_graphcoloring.cpp
@@ -68,6 +70,7 @@ list (APPEND TEST_SOURCE_FILES
   tests/test_stoppedwells.cpp
   tests/test_relpermdiagnostics.cpp
   tests/test_norne_pvt.cpp
+  tests/test_wellstatefullyimplicitblackoil.cpp
   )
 
 if(MPI_FOUND)
@@ -75,6 +78,13 @@ if(MPI_FOUND)
 endif()
 
 list (APPEND TEST_DATA_FILES
+  tests/SUMMARY_DECK_NON_CONSTANT_POROSITY.DATA
+  tests/equil_base.DATA
+  tests/equil_capillary.DATA
+  tests/equil_capillary_overlap.DATA
+  tests/equil_capillary_swatinit.DATA
+  tests/equil_deadfluids.DATA
+  tests/equil_pbvd_and_pdvd.DATA
   tests/VFPPROD1
   tests/VFPPROD2
   tests/msw.data
@@ -104,7 +114,9 @@ list (APPEND TEST_DATA_FILES
 # originally generated with the command:
 # find opm -name '*.h*' -a ! -name '*-pch.hpp' -printf '\t%p\n' | sort
 list (APPEND PUBLIC_HEADER_FILES
+  opm/autodiff/AquiferInterface.hpp
   opm/autodiff/AquiferCarterTracy.hpp
+  opm/autodiff/AquiferFetkovich.hpp
   opm/autodiff/BlackoilAmg.hpp
   opm/autodiff/BlackoilDetails.hpp
   opm/autodiff/BlackoilModelParametersEbos.hpp
@@ -163,6 +175,7 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/core/wells/WellsManager.hpp
   opm/core/wells/WellsManager_impl.hpp
   opm/simulators/ParallelFileMerger.hpp
+  opm/simulators/DeferredLoggingErrorHelpers.hpp
   opm/simulators/DeferredLogger.hpp
   opm/simulators/timestepping/AdaptiveSimulatorTimer.hpp
   opm/simulators/timestepping/AdaptiveTimeSteppingEbos.hpp

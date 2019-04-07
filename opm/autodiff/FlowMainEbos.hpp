@@ -132,20 +132,30 @@ namespace Opm
             // in flow only the deck file determines the end time of the simulation
             EWOMS_HIDE_PARAM(TypeTag, EndTime);
 
-            // time stepping is not (yet) done by the eWoms code in flow
+            // time stepping is not done by the eWoms code in flow
             EWOMS_HIDE_PARAM(TypeTag, InitialTimeStepSize);
             EWOMS_HIDE_PARAM(TypeTag, MaxTimeStepDivisions);
             EWOMS_HIDE_PARAM(TypeTag, MaxTimeStepSize);
             EWOMS_HIDE_PARAM(TypeTag, MinTimeStepSize);
             EWOMS_HIDE_PARAM(TypeTag, PredeterminedTimeStepsFile);
 
+            EWOMS_HIDE_PARAM(TypeTag, EclMaxTimeStepSizeAfterWellEvent);
+            EWOMS_HIDE_PARAM(TypeTag, EclRestartShrinkFactor);
+            EWOMS_HIDE_PARAM(TypeTag, EclMaxFails);
+            EWOMS_HIDE_PARAM(TypeTag, EclEnableTuning);
+
             // flow also does not use the eWoms Newton method
             EWOMS_HIDE_PARAM(TypeTag, NewtonMaxError);
             EWOMS_HIDE_PARAM(TypeTag, NewtonMaxIterations);
-            EWOMS_HIDE_PARAM(TypeTag, NewtonRawTolerance);
+            EWOMS_HIDE_PARAM(TypeTag, NewtonTolerance);
             EWOMS_HIDE_PARAM(TypeTag, NewtonTargetIterations);
             EWOMS_HIDE_PARAM(TypeTag, NewtonVerbose);
             EWOMS_HIDE_PARAM(TypeTag, NewtonWriteConvergence);
+            EWOMS_HIDE_PARAM(TypeTag, EclNewtonSumTolerance);
+            EWOMS_HIDE_PARAM(TypeTag, EclNewtonSumToleranceExponent);
+            EWOMS_HIDE_PARAM(TypeTag, EclNewtonStrictIterations);
+            EWOMS_HIDE_PARAM(TypeTag, EclNewtonRelaxedVolumeFraction);
+            EWOMS_HIDE_PARAM(TypeTag, EclNewtonRelaxedTolerance);
 
             // the default eWoms checkpoint/restart mechanism does not work with flow
             EWOMS_HIDE_PARAM(TypeTag, RestartTime);

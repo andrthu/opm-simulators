@@ -35,7 +35,6 @@
 #include <ewoms/common/propertysystem.hh>
 #include <ewoms/common/parametersystem.hh>
 #include <opm/autodiff/MissingFeatures.hpp>
-#include <opm/common/utility/parameters/ParameterGroup.hpp>
 #include <opm/material/common/ResetLocale.hpp>
 
 #include <opm/parser/eclipse/Deck/Deck.hpp>
@@ -114,6 +113,9 @@ namespace detail
 // ----------------- Main program -----------------
 int main(int argc, char** argv)
 {
+    Dune::Timer externalSetupTimer;
+    externalSetupTimer.start();
+
     detail::handleVersionCmdLine(argc, argv);
     // MPI setup.
 #if HAVE_DUNE_FEM
@@ -193,10 +195,10 @@ int main(int argc, char** argv)
             }
 
             deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
-            if ( outputCout ) {
-                Opm::checkDeck(*deck, parser);
-                Opm::MissingFeatures::checkKeywords(*deck);
-            }
+            Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
+
+            if ( outputCout )
+                Opm::checkDeck(*deck, parser, parseContext, errorGuard);
 
             eclipseState.reset( new Opm::EclipseState(*deck, parseContext, errorGuard ));
             schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
@@ -221,13 +223,13 @@ int main(int argc, char** argv)
             // oil-gas
             if (phases.active( Opm::Phase::GAS ))
             {
-                Opm::flowEbosGasOilSetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosGasOilSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosGasOilMain(argc, argv);
             }
             // oil-water
             else if ( phases.active( Opm::Phase::WATER ) )
             {
-                Opm::flowEbosOilWaterSetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosOilWaterSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosOilWaterMain(argc, argv);
             }
             else {
@@ -255,26 +257,26 @@ int main(int argc, char** argv)
             }
 
             if ( phases.size() == 3 ) { // oil water polymer case
-                Opm::flowEbosOilWaterPolymerSetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosOilWaterPolymerSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosOilWaterPolymerMain(argc, argv);
             } else {
-                Opm::flowEbosPolymerSetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosPolymerSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosPolymerMain(argc, argv);
             }
         }
         // Solvent case
         else if ( phases.active( Opm::Phase::SOLVENT ) ) {
-            Opm::flowEbosSolventSetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosSolventSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosSolventMain(argc, argv);
         }
         // Energy case
         else if (eclipseState->getSimulationConfig().isThermal()) {
-            Opm::flowEbosEnergySetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosEnergySetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosEnergyMain(argc, argv);
         }
         // Blackoil case
         else if( phases.size() == 3 ) {
-            Opm::flowEbosBlackoilSetDeck(*deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosBlackoilSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosBlackoilMain(argc, argv);
         }
         else
