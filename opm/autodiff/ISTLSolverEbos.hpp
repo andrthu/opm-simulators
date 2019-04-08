@@ -398,9 +398,9 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 		interiorSize_ = interiorRowAndColumns_.size();
 	    else
 		interiorSize_ = simulator_.vanguard().grid().numCells();
-	    //noGhostAdjecency();
+	    noGhostAdjecency();
 
-	    //setGhostsInNoGhost(*noGhost_);
+	    setGhostsInNoGhost(*noGhost_);
         }
 
         // nothing to clean here
@@ -482,10 +482,10 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             {
 		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 
-                //copyJacToNoGhost(*matrix_,*noGhost_);
+                copyJacToNoGhost(*matrix_,*noGhost_);
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
-                Operator opA(*matrix_, *matrix_, wellModel, interiorSize_,
+                Operator opA(*noGhost_, *noGhost_, wellModel, interiorSize_,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -643,7 +643,8 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             const MILU_VARIANT ilu_milu  = parameters_.ilu_milu_;
             const bool ilu_redblack = parameters_.ilu_redblack_;
             const bool ilu_reorder_spheres = parameters_.ilu_reorder_sphere_;
-            return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
+            //return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
+	    return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
         }
 #endif
 
