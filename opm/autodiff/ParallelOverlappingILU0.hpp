@@ -944,6 +944,64 @@ public:
 
         const size_type iEnd = lower_.rows();
         const size_type lastRow = iEnd - 1;
+	//size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
+	//size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
+	//const size_type lastInteriorRow = interiorSize_ - 1;
+        if( iEnd != upper_.rows() )
+        {
+            OPM_THROW(std::logic_error,"ILU: number of lower and upper rows must be the same");
+        }
+
+        // lower triangular solve
+        for( size_type i = 0; i < iEnd; ++ i )
+        {
+          dblock rhs( md[ i ] );
+          const size_type rowI     = lower_.rows_[ i ];
+          const size_type rowINext = lower_.rows_[ i+1 ];
+
+          for( size_type col = rowI; col < rowINext; ++ col )
+          {
+              lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
+          }
+
+          mv[ i ] = rhs;  // Lii = I
+        }
+
+        for( size_type i = 0; i < iEnd; ++ i )
+        {
+	    vblock& vBlock = mv[ lastRow - i ];
+	    vblock rhs ( vBlock );
+	    const size_type rowI     = upper_.rows_[ i ];
+	    const size_type rowINext = upper_.rows_[ i+1 ];
+	    
+	    for( size_type col = rowI; col < rowINext; ++ col )
+	    {
+	        upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
+	    }
+	    
+	    // apply inverse and store result
+	    inv_[ i ].mv( rhs, vBlock);
+        }
+
+        copyOwnerToAll( mv );
+
+        if( relaxation_ ) {
+            mv *= w_;
+        }
+        reorderBack(mv, v);
+    }
+    /*
+    virtual void apply (Domain& v, const Range& d)
+    {
+        Range& md = reorderD(d);
+        Domain& mv = reorderV(v);
+
+        // iterator types
+        typedef typename Range ::block_type  dblock;
+        typedef typename Domain::block_type  vblock;
+
+        const size_type iEnd = lower_.rows();
+        const size_type lastRow = iEnd - 1;
 	size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
 	size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
 	//const size_type lastInteriorRow = interiorSize_ - 1;
@@ -990,7 +1048,7 @@ public:
         }
         reorderBack(mv, v);
     }
-
+    */
     template <class V>
     void copyOwnerToAll( V& v ) const
     {
@@ -1112,9 +1170,17 @@ protected:
                     break;
                 default:
 		    if (useInteriorSize_)
+		    {
+			if (comm_->communicator().rank() == 0)
+			    std::cout << "Ghost last bILU" << std::endl;
 			detail::ghost_last_bilu0_decomposition(*ILU, interiorSize_);
+		    }
 		    else
+		    {
+			if (comm_->communicator().rank() == 0)
+			    std::cout << "Normal bILU" << std::endl;
 			bilu0_decomposition( *ILU );
+		    }
                     break;
                 }
             }

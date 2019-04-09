@@ -242,6 +242,10 @@ public:
 	
 	// add well model modification to y
 	wellMod_.apply(x, y );
+#if HAVE_MPI
+	if( comm_ )
+	    comm_->project( y );
+#endif
     }
 
     // y += \alpha * A * x
@@ -256,6 +260,10 @@ public:
 	}
 	// add scaled well model modification to y
 	wellMod_.applyScaleAdd( alpha, x, y );
+#if HAVE_MPI
+	if( comm_ )
+	    comm_->project( y );
+#endif
     }
 
     virtual const matrix_type& getmat() const { return A_for_precond_; }
@@ -396,10 +404,15 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
             //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
 	    detail::findOverlapAndInterior(simulator_.vanguard().grid(), overlapRowAndColumns_, interiorRowAndColumns_);
-	    if (simulator_.vanguard().grid().comm().size() > 1)
+	    if (simulator_.vanguard().grid().comm().size() > 1) {
 		interiorSize_ = interiorRowAndColumns_.size();
+		int reorderGhostMethod = simulator_.vanguard().reorderLocalMethod();
+		if (reorderGhostMethod == 0)
+		    interiorSize_ = simulator_.vanguard().grid().numCells();
+	    }
 	    else
 		interiorSize_ = simulator_.vanguard().grid().numCells();
+	    
 	    noGhostAdjecency();
 
 	    setGhostsInNoGhost(*noGhost_);
@@ -482,12 +495,13 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 
             if( isParallel() )
             {
-		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
-
-                copyJacToNoGhost(*matrix_,*noGhost_);
+		//typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		
+                copyJacToNoGhost(*matrix_, *noGhost_);
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
-                Operator opA(*noGhost_, *noGhost_, wellModel, interiorSize_,
+                Operator opA(*noGhost_, *noGhost_, wellModel,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -538,9 +552,10 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
             auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
 #else
-	    typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
+	    //typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
+	    typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-            SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
+            SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
 #endif
 
             // Communicate if parallel.
