@@ -426,7 +426,7 @@ namespace Opm
 
     //! Compute Blocked ILU0 decomposition, when we know junk ghost rows are located at the end of A
     template<class M>
-    void ghost_last_bilu0_decomposition (M& A, int interiorSize)
+    void ghost_last_bilu0_decomposition (M& A, size_t interiorSize)
     {
 	// iterator types
 	typedef typename M::RowIterator rowiterator;
@@ -434,8 +434,8 @@ namespace Opm
 	typedef typename M::block_type block;
 
 	// implement left looking variant with stored inverse
-	rowiterator begini = A.begin();
-	for (rowiterator i = begini; begini.distanceTo(i) < interiorSize; ++i)
+	size_t row_count = 0;
+	for (rowiterator i = A.begin(); row_count < interiorSize; ++i, ++row_count)
 	{
 	    // coliterator is diagonal after the following loop
 	    coliterator endij=(*i).end();           // end of row i
@@ -583,7 +583,7 @@ namespace Opm
       //! compute ILU decomposition of A. A is overwritten by its decomposition
       template<class M, class CRS, class InvVector>
       void convertToCRSGhostLast(const M& A, CRS& lower, CRS& upper, InvVector& inv , 
-				 unsigned interiorSize_)
+				 size_t interiorSize_)
       {
         // No need to do anything for 0 rows. Return to prevent indexing a
         // a zero sized array.
@@ -603,7 +603,8 @@ namespace Opm
         size_type numUpper = 0;
         const auto endi = A.end();
 	const auto begini = A.begin();
-        for (auto i = begini; begini.distanceTo(i) < interiorSize_; ++i) {
+	size_t row_count = 0;
+        for (auto i = A.begin(); row_count < interiorSize_; ++i, ++row_count) {
           const size_type iIndex = i.index();
           size_type numLowerRow = 0;
           for (auto j = (*i).begin(); j.index() < iIndex; ++j) {
@@ -622,9 +623,10 @@ namespace Opm
         size_type row = 0;
         size_type colcount = 0;
         lower.rows_[ 0 ] = colcount;
-        for (auto i=begini; i!=endi; ++i, ++row)
+	row_count = 0;
+        for (auto i=A.begin(); i!=endi; ++i, ++row_count)
         {
-	    if (begini.distanceTo(i) < interiorSize_) {
+	    if (row_count < interiorSize_) {
 		const size_type iIndex  = i.index();
 
 		// eliminate entries left of diagonal; store L factor
@@ -648,9 +650,10 @@ namespace Opm
 
         // NOTE: upper and inv store entries in reverse order, reverse here
         // relative to ILU
-        for (auto i=A.beforeEnd(); i!=rendi; --i )
+	row_count = A.N();
+        for (auto i=A.beforeEnd(); i!=rendi; --i, --row_count )
         {
-	    if (begini.distanceTo(i) < interiorSize_) 
+	    if (row_count < interiorSize_) 
 	    {
 		const size_type iIndex = i.index();
 
@@ -898,7 +901,7 @@ public:
     template<class BlockType, class Alloc>
     ParallelOverlappingILU0 (const Dune::BCRSMatrix<BlockType,Alloc>& A,
                              const ParallelInfo& comm, const field_type w,
-                             MILU_VARIANT milu, unsigned interiorSize,
+                             MILU_VARIANT milu, size_t interiorSize,
 			     bool redblack=false,
                              bool reorder_sphere=true)
         : lower_(),
@@ -912,9 +915,7 @@ public:
         // methods. Therefore this cast should be safe.
         useInteriorSize_ = true;
 	init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
-              reorder_sphere );
-	
-	
+              reorder_sphere, true, interiorSize);
     }
 
     /*!
@@ -933,6 +934,7 @@ public:
 
       \copydoc Preconditioner::apply(X&,const Y&)
     */
+    /*
     virtual void apply (Domain& v, const Range& d)
     {
         Range& md = reorderD(d);
@@ -942,10 +944,10 @@ public:
         typedef typename Range ::block_type  dblock;
         typedef typename Domain::block_type  vblock;
 
-        const size_type iEnd = lower_.rows();
-        const size_type lastRow = iEnd - 1;
-	//size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
-	//size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
+        //const size_type iEnd = lower_.rows();
+        //const size_type lastRow = iEnd - 1;
+	size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
+	size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
 	//const size_type lastInteriorRow = interiorSize_ - 1;
         if( iEnd != upper_.rows() )
         {
@@ -990,7 +992,7 @@ public:
         }
         reorderBack(mv, v);
     }
-    /*
+    */
     virtual void apply (Domain& v, const Range& d)
     {
         Range& md = reorderD(d);
@@ -1042,13 +1044,13 @@ public:
         }
 
         copyOwnerToAll( mv );
-
+	
         if( relaxation_ ) {
             mv *= w_;
         }
         reorderBack(mv, v);
     }
-    */
+    
     template <class V>
     void copyOwnerToAll( V& v ) const
     {
@@ -1068,7 +1070,8 @@ public:
     }
 
 protected:
-    void init( const Matrix& A, const int iluIteration, MILU_VARIANT milu, bool redBlack, bool reorderSpheres )
+    void init( const Matrix& A, const int iluIteration, MILU_VARIANT milu, bool redBlack, bool reorderSpheres, bool useInter=false,
+	       size_type interSize=0)
     {
         // (For older DUNE versions the communicator might be
         // invalid if redistribution in AMG happened on the coarset level.
@@ -1169,11 +1172,11 @@ protected:
                                                   detail::IsPositiveFunctor() );
                     break;
                 default:
-		    if (useInteriorSize_)
+		    if (useInter)
 		    {
 			if (comm_->communicator().rank() == 0)
 			    std::cout << "Ghost last bILU" << std::endl;
-			detail::ghost_last_bilu0_decomposition(*ILU, interiorSize_);
+			detail::ghost_last_bilu0_decomposition(*ILU, interSize);
 		    }
 		    else
 		    {

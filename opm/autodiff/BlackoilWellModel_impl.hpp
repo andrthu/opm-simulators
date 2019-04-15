@@ -133,6 +133,7 @@ namespace Opm {
         }
 
         for (const auto& well: well_container_) {
+	    std::cout << "We add well in mat" <<std::endl;
             well->addWellContributions(mat.istlMatrix());
 
             // applying the well residual to reservoir residuals

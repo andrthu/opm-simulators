@@ -24,6 +24,8 @@
 #ifndef OPM_BLACKOILDETAILS_HEADER_INCLUDED
 #define OPM_BLACKOILDETAILS_HEADER_INCLUDED
 
+#include <opm/grid/common/WellConnections.hpp>
+
 #include <opm/core/linalg/ParallelIstlInformation.hpp>
 #include <opm/core/props/BlackoilPhases.hpp>
 
@@ -248,13 +250,41 @@ namespace detail {
             }
         }
 
-        template<class Grid>
-        void findOverlapAndInterior(const Grid& grid, std::vector<std::pair<int,std::vector<int>>>& overlapRowAndColumns, 
-				    std::vector<std::pair<int,std::vector<int>>>& interiorRowCol)
+	template<class Grid, class W>
+	void findOverlapAndInterior(const Grid& grid, std::vector<std::pair<int,std::set<int>>>& overlapRowAndColumns, 
+				    std::vector<std::pair<int,std::set<int>>>& interiorRowCol, const W& wells, bool useWellConn)
         {
             //only relevant in parallel case.
             if ( grid.comm().size() > 1) 
             {
+		std::vector<std::set<int>> graph;
+		graph.resize(grid.numCells());
+
+		if (useWellConn) {
+		    const auto& cpgdim = grid.logicalCartesianSize();
+    
+		    std::vector<int> cart(cpgdim[0]*cpgdim[1]*cpgdim[2], -1);
+
+		    for( int i=0; i < grid.numCells(); ++i )
+			cart[grid.globalCell()[i]] = i;
+
+		    Dune::cpgrid::WellConnections well_indices;
+		    well_indices.init(wells, cpgdim, cart);
+
+		    for (auto& well : well_indices)
+		    {
+			for (auto perf = well.begin(); perf != well.end(); ++perf)
+			{
+			    auto perf2 = perf;
+			    for (++perf2; perf2 != well.end(); ++perf2)
+			    {
+				graph[*perf].insert(*perf2);
+				graph[*perf2].insert(*perf);
+			    }
+			} 
+		    }
+		}
+
                 //Numbering of cells
                 auto lid = grid.localIdSet();
 
@@ -266,49 +296,38 @@ namespace detail {
                 for (; elemIt != elemEndIt; ++elemIt) 
                 {		
                     const auto& elem = *elemIt;
+		    int lcell = lid.id(elem);
 
-                    //If cell has partition type not equal to interior save row
-                    if (elem.partitionType() != Dune::InteriorEntity)
-                    {		    
-                        //local id of overlap cell
-                        int lcell = lid.id(elem);
-
-                        std::vector<int> columns;
-                        //loop over faces of cell
-                        auto isend = gridView.iend(elem);
-                        for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
-                        {
-                            //check if face has neighbor
-                            if (is->neighbor())
-                            {
-                                //get index of neighbor cell
-                                int ncell = lid.id(is->outside());			    
-                                columns.push_back(ncell);
-                            }		
-                        }
-                        //add row to list
-                        overlapRowAndColumns.push_back(std::pair<int,std::vector<int>>(lcell,columns));	
-                    } else {
-int lcell = lid.id(elem);
-
-                        std::vector<int> columns;
-                        //loop over faces of cell
-                        auto isend = gridView.iend(elem);
-                        for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
-                        {
-                            //check if face has neighbor
-                            if (is->neighbor())
-                            {
-                                //get index of neighbor cell
-                                int ncell = lid.id(is->outside());			    
-                                columns.push_back(ncell);
-                            }
-                        }
-			interiorRowCol.push_back(std::pair<int,std::vector<int>>(lcell,columns));
-		    }    
-                }	      
-            }
-        }
+		    auto wconn = graph[lcell];
+		    
+		    std::set<int> columns;
+		    for (auto wc= wconn.begin(); wc!=wconn.end(); ++wc) {
+			if (*wc != lcell && useWellConn )
+			    columns.insert(*wc);
+		    }
+		    //loop over faces of cell
+		    auto isend = gridView.iend(elem);
+		    for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
+		    {
+			//check if face has neighbor
+			if (is->neighbor())
+			{
+			    //get index of neighbor cell
+			    int ncell = lid.id(is->outside());			    
+			    columns.insert(ncell);
+			}		
+		    }
+		    auto rowColumnPair = std::pair<int,std::set<int>>(lcell,columns);
+		    if (elem.partitionType() != Dune::InteriorEntity)
+		    {  
+			//add row to list
+			overlapRowAndColumns.push_back(rowColumnPair);
+		    } else {
+			interiorRowCol.push_back(rowColumnPair);
+		    }
+		} 
+	    }
+	}
     } // namespace detail
 } // namespace Opm
 

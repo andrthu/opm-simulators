@@ -543,6 +543,14 @@ namespace Opm
             }
 
             if (!ioConfig.initOnly()) {
+		if (mpi_size_ > 1) {
+		    std::ostringstream parallelGrid_ss;
+		    ebosSimulator_->vanguard().parallelGridOutput(parallelGrid_ss);
+		    if (output_cout_) {
+			OpmLog::note(parallelGrid_ss.str());
+		    }
+		}
+		
                 if (output_cout_) {
                     std::string msg;
                     msg = "\n\n================ Starting main simulation loop ===============\n";

@@ -21,6 +21,10 @@
 #ifndef OPM_ISTLSOLVER_EBOS_HEADER_INCLUDED
 #define OPM_ISTLSOLVER_EBOS_HEADER_INCLUDED
 
+#include <opm/common/OpmLog/OpmLog.hpp>
+#include <opm/common/OpmLog/EclipsePRTLog.hpp>
+#include <opm/common/OpmLog/LogUtil.hpp>
+
 #include <opm/autodiff/MatrixBlock.hpp>
 #include <opm/autodiff/BlackoilAmg.hpp>
 #include <opm/autodiff/CPRPreconditioner.hpp>
@@ -230,11 +234,10 @@ public:
     
     virtual void apply( const X& x, Y& y ) const
     {
-	y=0;
-
-	auto first_row = A_.begin();
-	for (auto row = first_row; first_row.distanceTo(row) < interiorSize_; ++row)
+	unsigned row_count = 0;
+	for (auto row = A_.begin(); row_count < interiorSize_; ++row, ++row_count)
 	{
+	    y[row.index()]=0;
 	    auto endc = (*row).end();
 	    for (auto col = (*row).begin(); col != endc; ++col)
 		(*col).umv(x[col.index()], y[row.index()]);
@@ -251,8 +254,9 @@ public:
     // y += \alpha * A * x
     virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
     {
-	auto first_row = A_.begin();
-	for (auto row = first_row; first_row.distanceTo(row) < interiorSize_; ++row)
+	//auto first_row = A_.begin();
+	unsigned row_count = 0;
+	for (auto row = A_.begin(); row_count < interiorSize_; ++row, ++row_count)
 	{
 	    auto endc = (*row).end();
 	    for (auto col = (*row).begin(); col != endc; ++col)
@@ -277,8 +281,9 @@ protected:
     const matrix_type& A_ ;
     const matrix_type& A_for_precond_ ;
     const WellModel& wellMod_;
+    size_t interiorSize_;
+    
     std::unique_ptr< communication_type > comm_;
-    int interiorSize_;
 };
 
 /*!
@@ -293,32 +298,39 @@ public:
     typedef X domain_type;
     typedef typename X::field_type field_type;
     typedef typename Dune::FieldTraits<field_type>::real_type real_type;
-    
+    typedef typename X::size_type size_type;
+
     typedef C communication_type;
     
     enum {
 	category = Dune::SolverCategory::overlapping
     };
 
-    GhostLastScalarProduct (const communication_type& com, unsigned interiorSize)
-	: cc(com), interiorSize_(interiorSize)
-    {}
+    GhostLastScalarProduct (const communication_type& com, size_type interiorSize)
+	: interiorSize_(interiorSize)
+    {	
+	comm_.reset(new communication_type(com.communicator()) );
+    }
     virtual field_type dot (const X& x, const X& y)
     {
-	field_type result = 0;
-	for (unsigned i = 0; i < interiorSize_; ++i)
+	field_type result = field_type(0.0);
+	for (size_type i = 0; i < interiorSize_; ++i)
 	    result += x[i]*(y[i]);
-	return cc.communicator().sum(result);
+	return comm_->communicator().sum(result);
     }
     
     virtual real_type norm (const X& x)
     {
-	return std::sqrt(dot(x,x));
+	field_type result = field_type(0.0);
+	for (size_type i = 0; i < interiorSize_; ++i)
+	    result += x[i].two_norm2();
+	return static_cast<double>(std::sqrt(comm_->communicator().sum(result)));
     }
     
 private:
-    const communication_type& cc;
-    unsigned interiorSize_;
+    std::unique_ptr< communication_type > comm_;
+    //const communication_type& cc;
+    size_type interiorSize_;
 };
 
 template <class  X, class C, int c>
@@ -402,20 +414,25 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         {
             parameters_.template init<TypeTag>();
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
-            //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
-	    detail::findOverlapAndInterior(simulator_.vanguard().grid(), overlapRowAndColumns_, interiorRowAndColumns_);
+	    //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
+
+	    const auto wellsForConn = simulator_.vanguard().schedule().getWells();
+	    const auto gridForConn = simulator_.vanguard().grid();
+	    const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
+	    
+	    detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
 	    if (simulator_.vanguard().grid().comm().size() > 1) {
 		interiorSize_ = interiorRowAndColumns_.size();
 		int reorderGhostMethod = simulator_.vanguard().reorderLocalMethod();
-		if (reorderGhostMethod == 0)
+		if (reorderGhostMethod == 0 || reorderGhostMethod == 6)
 		    interiorSize_ = simulator_.vanguard().grid().numCells();
 	    }
 	    else
 		interiorSize_ = simulator_.vanguard().grid().numCells();
 	    
-	    noGhostAdjecency();
+	    //noGhostAdjecency();
 
-	    setGhostsInNoGhost(*noGhost_);
+	    //setGhostsInNoGhost(*noGhost_);	    
         }
 
         // nothing to clean here
@@ -495,13 +512,15 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 
             if( isParallel() )
             {
-		//typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
-		typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		//typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 		
-                copyJacToNoGhost(*matrix_, *noGhost_);
+		//auto ebosJacIgnoreOverlap = Matrix(*matrix_);
+		//makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
+                //copyJacToNoGhost(*matrix_, *noGhost_);
                 //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
                 //to be certain that correct matrix is used for preconditioning.
-                Operator opA(*noGhost_, *noGhost_, wellModel,
+                Operator opA(*matrix_, *matrix_, wellModel, interiorSize_,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -559,7 +578,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #endif
 
             // Communicate if parallel.
-	    parallelInformation_arg.project(istlb);
+	    parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
@@ -660,8 +679,8 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             const MILU_VARIANT ilu_milu  = parameters_.ilu_milu_;
             const bool ilu_redblack = parameters_.ilu_redblack_;
             const bool ilu_reorder_spheres = parameters_.ilu_reorder_sphere_;
-            //return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
-	    return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
+            return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
+	    //return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
         }
 #endif
 
@@ -885,7 +904,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
             {
                 int lcell = row->first;
-                //diagonal block set to larg 1
+                //diagonal block set to 1
                 ng[lcell][lcell] = diag_block;
 	    }
 	}
@@ -1135,9 +1154,9 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         Vector *rhs_;
         std::unique_ptr<Matrix> matrix_for_preconditioner_;
 
-        std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
-	std::vector<std::pair<int,std::vector<int>>> interiorRowAndColumns_;
-	size_t interiorSize_;
+        std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
+	std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
+	size_t interiorSize_=0;
 
         FlowLinearSolverParameters parameters_;
         Vector weights_;

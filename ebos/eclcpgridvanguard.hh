@@ -214,6 +214,64 @@ public:
 
         this->updateGridView_();
     }
+    /*!
+     * \brief Method for outputting parallel and partitioned grid info to prt file. 
+     */
+    void parallelGridOutput(std::ostringstream& ss)
+    {
+        auto cc = grid_->comm();
+        int rank = cc.rank();
+        int size = cc.size();
+
+        // --- send numCells to rank 0 
+        int numCells = grid_->numCells();
+        
+        int allCells[size];
+        cc.gather(&numCells, allCells, 1, 0);
+
+        // --- print numCells on each rank from rank 0
+        if (rank == 0) {
+            ss <<"\n";
+            for (int r = 0; r < size; ++r) {
+                int cells = allCells[r];
+                ss << "Rank "<< r << " numCells: " << cells << "\n"; 
+            }
+            ss << "\n\n";
+        }
+        
+        // --- For each rank i, find number of cells belonging to rank j, j != i. 
+        std::vector<int> comTab;
+        comTab.resize(size, 0);
+        findCommunicationPattern_(comTab);
+        
+        // --- Send comTab info to rank 0
+        int totComTabSize = size*size;
+        int* sendComTab = comTab.data();
+        int entireComTab[totComTabSize];
+
+        int start[size];
+        int length[size];
+        for (int i = 0; i < size; ++i) {
+            start[i] = i*size;
+            length[i] = size;
+        }
+        
+        cc.gatherv(sendComTab, size, entireComTab, length, start, 0);
+
+        // --- print comTab from rank 0.
+        if (rank == 0) {
+            for (int prc = 0; prc < size; ++prc) 
+            {
+                ss << "ComTab rank " << prc << ": ";
+                for ( int nab = 0; nab < size; ++nab)
+                {
+                    int idx = prc*size + nab;
+                    ss << entireComTab[idx] << " ";
+                }
+                ss << "\n";
+            }
+        }
+    }
 
     /*!
      * \brief Free the memory occupied by the global transmissibility object.
@@ -286,6 +344,29 @@ protected:
         const auto eclipseGrid = Opm::UgGridHelpers::createEclipseGrid(grid, this->eclState().getInputGrid());
         this->schedule().filterConnections(eclipseGrid);
     }
+    
+    /*!
+     * \brief Find number and origin of cells not belonging to this process.
+     */
+    void findCommunicationPattern_(std::vector<int>& comTab)
+    {
+        const auto& rid = grid_->getCellRemoteIndices();
+        
+        for (auto prc = rid.begin(); prc!=rid.end(); ++prc)
+        {
+            auto proc = *prc;
+            int nab_rank = proc.first;
+            auto nab_list = proc.second.first;
+            for(auto cell =  nab_list->begin(); cell != nab_list->end(); ++cell)
+            {
+                auto att = cell->localIndexPair().local().attribute(); 
+                if ( att == Dune::OwnerOverlapCopyAttributeSet::copy ) {
+                    comTab[nab_rank]++;
+                }
+            }
+        }
+    }
+
 
     Grid* grid_;
     EquilGrid* equilGrid_;
