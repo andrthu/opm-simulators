@@ -168,7 +168,6 @@ public:
       return comm_.operator->();
   }
 
-protected:
   const matrix_type& A_ ;
   const matrix_type& A_for_precond_ ;
   const WellModel& wellMod_;
@@ -245,10 +244,8 @@ public:
 	
 	// add well model modification to y
 	wellMod_.apply(x, y );
-#if HAVE_MPI
-	if( comm_ )
-	    comm_->project( y );
-#endif
+
+	ghostLastProject( y );
     }
 
     // y += \alpha * A * x
@@ -264,10 +261,7 @@ public:
 	}
 	// add scaled well model modification to y
 	wellMod_.applyScaleAdd( alpha, x, y );
-#if HAVE_MPI
-	if( comm_ )
-	    comm_->project( y );
-#endif
+	ghostLastProject( y );
     }
 
     virtual const matrix_type& getmat() const { return A_for_precond_; }
@@ -278,6 +272,13 @@ public:
     }
     
 protected:
+    void ghostLastProject(Y& y)
+    {
+	size_t end = y.size();
+	for (size_t i = interiorSize_; i < end; ++i)
+	    y[i] = 0;
+    }
+    
     const matrix_type& A_ ;
     const matrix_type& A_for_precond_ ;
     const WellModel& wellMod_;
@@ -329,7 +330,6 @@ public:
     
 private:
     std::unique_ptr< communication_type > comm_;
-    //const communication_type& cc;
     size_type interiorSize_;
 };
 
