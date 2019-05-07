@@ -261,6 +261,7 @@ public:
 	}
 	// add scaled well model modification to y
 	wellMod_.applyScaleAdd( alpha, x, y );
+	
 	ghostLastProject( y );
     }
 
@@ -272,7 +273,7 @@ public:
     }
     
 protected:
-    void ghostLastProject(Y& y)
+    void ghostLastProject(Y& y) const
     {
 	size_t end = y.size();
 	for (size_t i = interiorSize_; i < end; ++i)
