@@ -197,14 +197,7 @@ public:
                     faceTrans[faceIdx] = globalTrans_->transmissibility(I, J);
                 }
             }
-            if (mpiRank == 0) {
-                std::ofstream transFaceFile;
-                transFaceFile.open("FlowTransFaceFile.txt");
-                for (size_t f = 0; f < numFaces; ++f) {
-                    transFaceFile << faceTrans[f] <<"\n";
-                }
-                transFaceFile.close();
-            }
+            
             //distribute the grid and switch to the distributed view.
             {
                 const auto wells = this->schedule().getWells();
