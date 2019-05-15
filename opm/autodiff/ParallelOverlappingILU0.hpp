@@ -934,21 +934,18 @@ public:
 
       \copydoc Preconditioner::apply(X&,const Y&)
     */
-    /*
     virtual void apply (Domain& v, const Range& d)
     {
         Range& md = reorderD(d);
         Domain& mv = reorderV(v);
-
+	copyOwnerToAll( mv );
+	
         // iterator types
         typedef typename Range ::block_type  dblock;
         typedef typename Domain::block_type  vblock;
 
-        //const size_type iEnd = lower_.rows();
-        //const size_type lastRow = iEnd - 1;
-	size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
-	size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
-	//const size_type lastInteriorRow = interiorSize_ - 1;
+        const size_type iEnd = lower_.rows();
+        const size_type lastRow = iEnd - 1;
         if( iEnd != upper_.rows() )
         {
             OPM_THROW(std::logic_error,"ILU: number of lower and upper rows must be the same");
@@ -968,7 +965,8 @@ public:
 
           mv[ i ] = rhs;  // Lii = I
         }
-
+	copyOwnerToAll( mv );
+	
         for( size_type i = 0; i < iEnd; ++ i )
         {
 	    vblock& vBlock = mv[ lastRow - i ];
@@ -992,7 +990,7 @@ public:
         }
         reorderBack(mv, v);
     }
-    */
+    /*
     virtual void apply (Domain& v, const Range& d)
     {
         Range& md = reorderD(d);
@@ -1050,7 +1048,7 @@ public:
         }
         reorderBack(mv, v);
     }
-    
+    */
     template <class V>
     void copyOwnerToAll( V& v ) const
     {
@@ -1172,7 +1170,7 @@ protected:
                                                   detail::IsPositiveFunctor() );
                     break;
                 default:
-		    if (useInter)
+		    if (false)
 		    {
 			if (comm_->communicator().rank() == 0)
 			    std::cout << "Ghost last bILU" << std::endl;

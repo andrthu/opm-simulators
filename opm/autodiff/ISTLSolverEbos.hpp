@@ -174,200 +174,6 @@ public:
   std::unique_ptr< communication_type > comm_;
 };
 
-/*!
-   \brief Adapter to turn a matrix into a linear operator.
-
-   Adapts a matrix to the assembled linear operator interface.
-
-   We assume parallel ordering, where ghost rows are located after interior rows
- */
-template<class M, class X, class Y, class WellModel, bool overlapping >
-class WellModelGhostLastMatrixAdapter : public Dune::AssembledLinearOperator<M,X,Y>
-{
-    typedef Dune::AssembledLinearOperator<M,X,Y> BaseType;
-
-public:
-    typedef M matrix_type;
-    typedef X domain_type;
-    typedef Y range_type;
-    typedef typename X::field_type field_type;
-
-#if HAVE_MPI
-    typedef Dune::OwnerOverlapCopyCommunication<int,int> communication_type;
-#else
-    typedef Dune::CollectiveCommunication< int > communication_type;
-#endif
-
-#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
-    Dune::SolverCategory::Category category() const override
-    {
-	return overlapping ?
-	    Dune::SolverCategory::overlapping : Dune::SolverCategory::sequential;
-    }
-#else
-    enum {
-	//! \brief The solver category.
-	category = overlapping ?
-        Dune::SolverCategory::overlapping :
-        Dune::SolverCategory::sequential
-    };
-#endif
-    
-    //! constructor: just store a reference to a matrix
-    WellModelGhostLastMatrixAdapter (const M& A,
-				     const M& A_for_precond,
-				     const WellModel& wellMod,
-				     const size_t interiorSize,
-				     const boost::any& parallelInformation = boost::any() )
-	: A_( A ), A_for_precond_(A_for_precond), wellMod_( wellMod ), interiorSize_(interiorSize), comm_()
-    {
-#if HAVE_MPI
-	if( parallelInformation.type() == typeid(ParallelISTLInformation) )
-	{
-	    const ParallelISTLInformation& info =
-		boost::any_cast<const ParallelISTLInformation&>( parallelInformation);
-	    comm_.reset( new communication_type( info.communicator() ) );
-	}
-#endif
-    }
-    
-    virtual void apply( const X& x, Y& y ) const
-    {
-	unsigned row_count = 0;
-	for (auto row = A_.begin(); row_count < interiorSize_; ++row, ++row_count)
-	{
-	    y[row.index()]=0;
-	    auto endc = (*row).end();
-	    for (auto col = (*row).begin(); col != endc; ++col)
-		(*col).umv(x[col.index()], y[row.index()]);
-	}
-	
-	// add well model modification to y
-	wellMod_.apply(x, y );
-
-	ghostLastProject( y );
-    }
-
-    // y += \alpha * A * x
-    virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
-    {
-	//auto first_row = A_.begin();
-	unsigned row_count = 0;
-	for (auto row = A_.begin(); row_count < interiorSize_; ++row, ++row_count)
-	{
-	    auto endc = (*row).end();
-	    for (auto col = (*row).begin(); col != endc; ++col)
-		(*col).usmv(alpha, x[col.index()], y[row.index()]);
-	}
-	// add scaled well model modification to y
-	wellMod_.applyScaleAdd( alpha, x, y );
-	
-	ghostLastProject( y );
-    }
-
-    virtual const matrix_type& getmat() const { return A_for_precond_; }
-
-    communication_type* comm()
-    {
-	return comm_.operator->();
-    }
-    
-protected:
-    void ghostLastProject(Y& y) const
-    {
-	size_t end = y.size();
-	for (size_t i = interiorSize_; i < end; ++i)
-	    y[i] = 0;
-    }
-    
-    const matrix_type& A_ ;
-    const matrix_type& A_for_precond_ ;
-    const WellModel& wellMod_;
-    size_t interiorSize_;
-    
-    std::unique_ptr< communication_type > comm_;
-};
-
-/*!
-  \brief parallel ScalarProduct, that assumes ghost cells are ordered last 
-
-  Implements the Dune ScalarProduct interface
- */
-template<class X, class C>
-class GhostLastScalarProduct : public Dune::ScalarProduct<X>
-{
-public:
-    typedef X domain_type;
-    typedef typename X::field_type field_type;
-    typedef typename Dune::FieldTraits<field_type>::real_type real_type;
-    typedef typename X::size_type size_type;
-
-    typedef C communication_type;
-    
-    enum {
-	category = Dune::SolverCategory::overlapping
-    };
-
-    GhostLastScalarProduct (const communication_type& com, size_type interiorSize)
-	: interiorSize_(interiorSize)
-    {	
-	comm_.reset(new communication_type(com.communicator()) );
-    }
-    virtual field_type dot (const X& x, const X& y)
-    {
-	field_type result = field_type(0.0);
-	for (size_type i = 0; i < interiorSize_; ++i)
-	    result += x[i]*(y[i]);
-	return comm_->communicator().sum(result);
-    }
-    
-    virtual real_type norm (const X& x)
-    {
-	field_type result = field_type(0.0);
-	for (size_type i = 0; i < interiorSize_; ++i)
-	    result += x[i].two_norm2();
-	return static_cast<double>(std::sqrt(comm_->communicator().sum(result)));
-    }
-    
-private:
-    std::unique_ptr< communication_type > comm_;
-    size_type interiorSize_;
-};
-
-template <class  X, class C, int c>
-struct GhostLastSPChooser
-{
-    typedef C communication_type;
-
-    enum { solverCategory = c};
-};
-
-template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential>
-{
-    typedef Dune::SeqScalarProduct<X> ScalarProduct;
-    enum { category = Dune::SolverCategory::sequential};
-
-    static ScalarProduct* construct(const C& comm, size_t is)
-    {
-	return new ScalarProduct();
-    }
-};
-
-template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
-{
-    typedef  GhostLastScalarProduct<X,C> ScalarProduct;
-    typedef C communication_type;
-
-    enum {category = Dune::SolverCategory::overlapping};
-
-    static ScalarProduct* construct(const communication_type& comm, size_t is)
-    {
-	return new ScalarProduct(comm, is);
-    }
-};
-
     /// This class solves the fully implicit black-oil system by
     /// solving the reduced system (after eliminating well variables)
     /// as a block-structured matrix (one block for all cell variables) for a fixed
@@ -415,25 +221,13 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         {
             parameters_.template init<TypeTag>();
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
-	    //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
 
 	    const auto wellsForConn = simulator_.vanguard().schedule().getWells();
 	    const auto gridForConn = simulator_.vanguard().grid();
 	    const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
 	    
-	    detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
-	    if (simulator_.vanguard().grid().comm().size() > 1) {
-		interiorSize_ = interiorRowAndColumns_.size();
-		int reorderGhostMethod = simulator_.vanguard().reorderLocalMethod();
-		if (reorderGhostMethod == 0 || reorderGhostMethod == 6)
-		    interiorSize_ = simulator_.vanguard().grid().numCells();
-	    }
-	    else
-		interiorSize_ = simulator_.vanguard().grid().numCells();
+	    //detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
 	    
-	    //noGhostAdjecency();
-
-	    //setGhostsInNoGhost(*noGhost_);	    
         }
 
         // nothing to clean here
@@ -513,15 +307,10 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 
             if( isParallel() )
             {
-		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
-		//typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 		
-		//auto ebosJacIgnoreOverlap = Matrix(*matrix_);
-		//makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
-                //copyJacToNoGhost(*matrix_, *noGhost_);
-                //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
-                //to be certain that correct matrix is used for preconditioning.
-                Operator opA(*matrix_, *matrix_, wellModel, interiorSize_,
+		
+                Operator opA(*matrix_, *matrix_, wellModel,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -572,14 +361,13 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
             auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
 #else
-	    //typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
 	    typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
             SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
 #endif
 
             // Communicate if parallel.
-	    //parallelInformation_arg.copyOwnerToAll(istlb, istlb);
+	    parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 	    //parallelInformation_arg.project(istlb);
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
@@ -680,8 +468,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             const MILU_VARIANT ilu_milu  = parameters_.ilu_milu_;
             const bool ilu_redblack = parameters_.ilu_redblack_;
             const bool ilu_reorder_spheres = parameters_.ilu_reorder_sphere_;
-            return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
-	    //return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
+	    return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
         }
 #endif
 
@@ -731,8 +518,8 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
                 // Solve system.
                 linsolve.apply(x, istlb, result);
 
-		if (simulator_.gridView().comm().rank() == 0)
-		    std::cout << "Elapsed: " << result.elapsed <<" solveIt: " << result.iterations <<std::endl; 
+		//if (simulator_.gridView().comm().rank() == 0)
+		//    std::cout << "Elapsed: " << result.elapsed <<" solveIt: " << result.iterations <<std::endl; 
             }
         }
 
@@ -839,100 +626,11 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             return false;
 #endif
         }
-	/// Create sparsity pattern of matrix without off-diagonal ghost entries.
-	void noGhostAdjecency()
-        {
-	    auto grid = simulator_.vanguard().grid();
-	    typedef typename Matrix::size_type size_type;
-	    size_type numCells = grid.numCells();
-	    noGhost_.reset(new Matrix(numCells, numCells, Matrix::random));
+	
 
-	    std::vector<std::set<size_type>> pattern;
-	    pattern.resize(numCells);
-
-            auto lid = grid.localIdSet();	    
-            const auto& gridView = grid.leafGridView();
-            auto elemIt = gridView.template begin<0>();
-            const auto& elemEndIt = gridView.template end<0>();
-	    
-            //Loop over cells
-            for (; elemIt != elemEndIt; ++elemIt) 
-            {		
-                const auto& elem = *elemIt;
-                size_type idx = lid.id(elem);
-                pattern[idx].insert(idx);
-
-		// Add just a single element to ghost rows
-		if (elem.partitionType() != Dune::InteriorEntity)
-		{
-		    noGhost_->setrowsize(idx, pattern[idx].size());
-		}
-		else {
-		    auto isend = gridView.iend(elem);
-		    for (auto is = gridView.ibegin(elem); is!=isend; ++is) 
-                    {
-			//check if face has neighbor
-			if (is->neighbor())
-                        {
-			    size_type nid =lid.id(is->outside());
-			    pattern[idx].insert(nid);
-			}
-		    }
-		    noGhost_->setrowsize(idx, pattern[idx].size());
-		}
-	    }
-	    noGhost_->endrowsizes();
-	    for (size_type dofId = 0; dofId < numCells; ++dofId)
-	    {
-		auto nabIdx = pattern[dofId].begin();
-		auto endNab = pattern[dofId].end();
-		for (; nabIdx != endNab; ++nabIdx)
-		{
-		    noGhost_->addindex(dofId, *nabIdx);
-		}
-	    }
-	    noGhost_->endindices();
-	}
-
-	/// Set the ghost diagonal to Block(1.0)
-	void setGhostsInNoGhost(Matrix& ng)
-	{
-            ng=0;
-
-            typedef typename Matrix::block_type MatrixBlockType;
-            MatrixBlockType diag_block(0.0);
-            for (int eq = 0; eq < Matrix::block_type::rows; ++eq)
-                diag_block[eq][eq] = 1.0;
-
-            //loop over precalculated overlap rows and columns
-            for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
-            {
-                int lcell = row->first;
-                //diagonal block set to 1
-                ng[lcell][lcell] = diag_block;
-	    }
-	}
-	void copyJacToNoGhost(const Matrix& jac, Matrix& ng)
-	{
-            //Loop over precalculated interior rows. 
-            for (auto row = interiorRowAndColumns_.begin(); row != interiorRowAndColumns_.end(); row++ )
-            {
-                int lcell = row->first;
-                //Copy diagonal
-                ng[lcell][lcell] = jac[lcell][lcell];
-
-                //Loop over off diagonal blocks in interior row
-                for (auto col = row->second.begin(); col != row->second.end(); ++col)
-                {
-                    int ncell = *col;
-                    //Copy off-diagonal
-                    ng[lcell][ncell] = jac[lcell][ncell];
-                }
-            }
-	}
-
-        /// Zero out off-diagonal blocks on rows corresponding to overlap cells
+	/// Zero out off-diagonal blocks on rows corresponding to overlap cells
         /// Diagonal blocks on ovelap rows are set to diag(1.0).
+	/*
         void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
         {
             //value to set on diagonal
@@ -957,7 +655,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
                 }
             }
         }
-
+	*/
         // Weights to make approximate pressure equations.
         // Calculated from the storage terms (only) of the
         // conservation equations, ignoring all other terms.
@@ -1152,15 +850,10 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         boost::any parallelInformation_;
         bool isIORank_;
         std::unique_ptr<Matrix> matrix_;
-	std::unique_ptr<Matrix> noGhost_;
 
         //std::unique_ptr<Matrix> matrix_;
         Vector *rhs_;
         std::unique_ptr<Matrix> matrix_for_preconditioner_;
-
-        std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
-	std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
-	size_t interiorSize_=0;
 
         FlowLinearSolverParameters parameters_;
         Vector weights_;
