@@ -224,9 +224,9 @@ public:
 
 	    const auto wellsForConn = simulator_.vanguard().schedule().getWells();
 	    const auto gridForConn = simulator_.vanguard().grid();
-	    //const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
+	    const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
 	    
-	    //detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
+	    detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
 	    
         }
 
@@ -308,9 +308,10 @@ public:
             if( isParallel() )
             {
 		typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		Matrix jacIgnoreOverlap(*matrix_);
+		makeOverlapRowsInvalid(jacIgnoreOverlap);
 		
-		
-                Operator opA(*matrix_, *matrix_, wellModel,
+                Operator opA(jacIgnoreOverlap, jacIgnoreOverlap, wellModel,
                              parallelInformation_ );
                 assert( opA.comm() );
                 solve( opA, x, *rhs_, *(opA.comm()) );
@@ -630,14 +631,14 @@ public:
 
 	/// Zero out off-diagonal blocks on rows corresponding to overlap cells
         /// Diagonal blocks on ovelap rows are set to diag(1.0).
-	/*
+	
         void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
         {
             //value to set on diagonal
             typedef Dune::FieldMatrix<Scalar, numEq, numEq > MatrixBlockType;
             MatrixBlockType diag_block(0.0);
             for (int eq = 0; eq < numEq; ++eq)
-                diag_block[eq][eq] = 1.0;
+                diag_block[eq][eq] = 1.0e100;
 
             //loop over precalculated overlap rows and columns
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
@@ -655,7 +656,7 @@ public:
                 }
             }
         }
-	*/
+	
         // Weights to make approximate pressure equations.
         // Calculated from the storage terms (only) of the
         // conservation equations, ignoring all other terms.
@@ -858,6 +859,10 @@ public:
         FlowLinearSolverParameters parameters_;
         Vector weights_;
         bool scale_variables_;
+
+	std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
+	std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
+	
     }; // end ISTLSolver
 
 } // namespace Opm
