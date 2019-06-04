@@ -224,7 +224,7 @@ public:
 
 	    const auto wellsForConn = simulator_.vanguard().schedule().getWells();
 	    const auto gridForConn = simulator_.vanguard().grid();
-	    const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
+	    //const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
 	    
 	    //detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
 	    
