@@ -368,7 +368,7 @@ public:
 #endif
 
             // Communicate if parallel.
-	    parallelInformation_arg.copyOwnerToAll(istlb, istlb);
+	    //parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 	    //parallelInformation_arg.project(istlb);
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
