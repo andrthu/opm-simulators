@@ -1174,14 +1174,10 @@ protected:
                 default:
 		    if (useInter)
 		    {
-			if (comm_->communicator().rank() == 0)
-			    std::cout << "Ghost last bILU" << std::endl;
 			detail::ghost_last_bilu0_decomposition(*ILU, interSize);
 		    }
 		    else
 		    {
-			if (comm_->communicator().rank() == 0)
-			    std::cout << "Normal bILU" << std::endl;
 			bilu0_decomposition( *ILU );
 		    }
                     break;

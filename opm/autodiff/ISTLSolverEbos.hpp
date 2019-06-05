@@ -415,25 +415,15 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         {
             parameters_.template init<TypeTag>();
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
-	    //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
 
-	    const auto wellsForConn = simulator_.vanguard().schedule().getWells();
-	    const auto gridForConn = simulator_.vanguard().grid();
-	    const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
 	    
-	    detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellsForConn, useWellConn);
-	    if (simulator_.vanguard().grid().comm().size() > 1) {
-		interiorSize_ = interiorRowAndColumns_.size();
-		int reorderGhostMethod = simulator_.vanguard().reorderLocalMethod();
-		if (reorderGhostMethod == 0 || reorderGhostMethod == 6)
-		    interiorSize_ = simulator_.vanguard().grid().numCells();
-	    }
-	    else
-		interiorSize_ = simulator_.vanguard().grid().numCells();
+	    const auto gridHelp = simulator_.vanguard().grid();
 	    
-	    //noGhostAdjecency();
-
-	    //setGhostsInNoGhost(*noGhost_);	    
+	    interiorSize_ = detail::numInteriorCells(gridHelp);
+	    
+	    int reorderGhostMethod = simulator_.vanguard().reorderLocalMethod();
+	    if (reorderGhostMethod == 0 || reorderGhostMethod == 6)
+		interiorSize_ = gridHelp.numCells();
         }
 
         // nothing to clean here
@@ -514,13 +504,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
             if( isParallel() )
             {
 		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
-		//typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 		
-		//auto ebosJacIgnoreOverlap = Matrix(*matrix_);
-		//makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
-                //copyJacToNoGhost(*matrix_, *noGhost_);
-                //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
-                //to be certain that correct matrix is used for preconditioning.
                 Operator opA(*matrix_, *matrix_, wellModel, interiorSize_,
                              parallelInformation_ );
                 assert( opA.comm() );
@@ -579,7 +563,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #endif
 
             // Communicate if parallel.
-	    parallelInformation_arg.copyOwnerToAll(istlb, istlb);
+	    //parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
@@ -890,7 +874,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 	    }
 	    noGhost_->endindices();
 	}
-
+	/*
 	/// Set the ghost diagonal to Block(1.0)
 	void setGhostsInNoGhost(Matrix& ng)
 	{
@@ -954,7 +938,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
                 }
             }
         }
-
+	*/
         // Weights to make approximate pressure equations.
         // Calculated from the storage terms (only) of the
         // conservation equations, ignoring all other terms.
@@ -1155,8 +1139,8 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         Vector *rhs_;
         std::unique_ptr<Matrix> matrix_for_preconditioner_;
 
-        std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
-	std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
+        //std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
+	//std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
 	size_t interiorSize_=0;
 
         FlowLinearSolverParameters parameters_;

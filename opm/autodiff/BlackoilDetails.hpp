@@ -328,6 +328,33 @@ namespace detail {
 		} 
 	    }
 	}
+    
+        template<class Grid>
+	size_t numInteriorCells(const Grid& grid)
+	{
+	    size_t interiorC = 0;
+		
+	    if ( grid.comm().size() > 1)
+	    {
+		const auto& gridView = grid.leafGridView();
+		auto elemIt = gridView.template begin<0>();
+		const auto& elemEndIt = gridView.template end<0>();
+
+		//loop over cells in mesh
+		for (; elemIt != elemEndIt; ++elemIt)
+		{
+		    if (elemIt->partitionType() == Dune::InteriorEntity)
+		    {
+			interiorC++;
+		    }
+		}
+	    }
+	    else
+	    {
+		interiorC = grid.numCells();
+	    }
+	    return interiorC;		
+	}
     } // namespace detail
 } // namespace Opm
 
