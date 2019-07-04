@@ -101,17 +101,22 @@ public:
             return; // tracer treatment is supposed to be disabled
 
         if (!EWOMS_GET_PARAM(TypeTag, bool, EnableTracerModel)) {
-            std::cout << "Warning: Tracer model is disabled but the deck contatins the TRACERS keyword \n";
-            std::cout << "The tracer model must be activated using --enable-tracer-model=true "<< std::endl;
+            if (simulator_.gridView().comm().rank() == 0) {
+                std::cout << "Warning: Tracer model is disabled but the deck contains the TRACERS keyword\n"
+                          << "The tracer model must be explictly activated using --enable-tracer-model=true\n"
+                          << std::flush;
+            }
             return; // Tracer transport must be enabled by the user
         }
 
         if (!deck.hasKeyword("TRACER"))
-            throw std::runtime_error("the deck does not contain the TRACER keyword");
+            throw std::runtime_error("The deck does not contain the TRACER keyword");
 
         if (simulator_.gridView().comm().size() > 1) {
             tracerNames_.resize(0);
-            std::cout << "Warning: Tracer model is not compatible with mpi run"  << std::endl;
+            if (simulator_.gridView().comm().rank() == 0)
+                std::cout << "Warning: The tracer model currently does not work for parallel runs\n"
+                          << std::flush;
             return;
         }
 
@@ -477,15 +482,15 @@ protected:
 
         // Wells
         const int episodeIdx = simulator_.episodeIndex();
-        const auto& wells = simulator_.vanguard().schedule().getWells(episodeIdx);
-        for (auto well : wells) {
+        const auto& wells = simulator_.vanguard().schedule().getWells2(episodeIdx);
+        for (const auto& well : wells) {
 
-            if (well->getStatus(episodeIdx) == Opm::WellCommon::SHUT)
+            if (well.getStatus() == Opm::WellCommon::SHUT)
                 continue;
 
-            const double wtracer = well->getTracerProperties(episodeIdx).getConcentration(tracerNames_[tracerIdx]);
+            const double wtracer = well.getTracerProperties().getConcentration(tracerNames_[tracerIdx]);
             std::array<int, 3> cartesianCoordinate;
-            for (auto& connection : well->getConnections(episodeIdx)) {
+            for (auto& connection : well.getConnections()) {
 
                 if (connection.state() == Opm::WellCompletion::SHUT)
                     continue;
@@ -495,7 +500,7 @@ protected:
                 cartesianCoordinate[2] = connection.getK();
                 const size_t cartIdx = simulator_.vanguard().cartesianIndex(cartesianCoordinate);
                 const int I = cartToGlobal_[cartIdx];
-                Scalar rate = simulator_.problem().wellModel().well(well->name())->volumetricSurfaceRateForConnection(I, tracerPhaseIdx_[tracerIdx]);
+                Scalar rate = simulator_.problem().wellModel().well(well.name())->volumetricSurfaceRateForConnection(I, tracerPhaseIdx_[tracerIdx]);
                 if (rate > 0)
                     tracerResidual_[I][0] -= rate*wtracer;
                 else if (rate < 0)

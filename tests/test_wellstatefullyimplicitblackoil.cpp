@@ -21,7 +21,7 @@
 
 #define BOOST_TEST_MODULE WellStateFIBOTest
 
-#include <opm/autodiff/WellStateFullyImplicitBlackoil.hpp>
+#include <opm/simulators/wells/WellStateFullyImplicitBlackoil.hpp>
 
 #include <boost/test/unit_test.hpp>
 
@@ -51,12 +51,14 @@ struct Setup
         , pu   (Opm::phaseUsageFromDeck(es))
         , grid (es.getInputGrid())
         , sched(deck, es)
+        , st()
     {}
 
     Opm::EclipseState es;
     Opm::PhaseUsage   pu;
     Opm::GridManager  grid;
     Opm::Schedule     sched;
+    Opm::SummaryState st;
 };
 
 namespace {
@@ -69,24 +71,21 @@ namespace {
             std::vector<double>(setup.grid.c_grid()->number_of_cells,
                                 100.0*Opm::unit::barsa);
 
-        const Opm::WellsManager wmgr{
-            setup.es, setup.sched, timeStep, *setup.grid.c_grid()
-        };
+        const Opm::WellsManager wmgr{setup.es, setup.sched, setup.st, timeStep, *setup.grid.c_grid()};
 
         state.init(wmgr.c_wells(), cpress, setup.sched,
-                   setup.sched.getWells(timeStep),
+                   setup.sched.getWells2(timeStep),
                    timeStep, nullptr, setup.pu);
 
         state.initWellStateMSWell(wmgr.c_wells(),
-                                  setup.sched.getWells(timeStep),
-                                  timeStep, setup.pu, nullptr);
+                                  setup.sched.getWells2(timeStep),
+                                  setup.pu, nullptr);
 
         return state;
     }
 
 
-    void setSegPress(const std::vector<const Opm::Well*>& wells,
-                     const std::size_t                    tstep,
+    void setSegPress(const std::vector<Opm::Well2>& wells,
                      Opm::WellStateFullyImplicitBlackoil& wstate)
     {
         const auto nWell = wells.size();
@@ -94,7 +93,7 @@ namespace {
         auto& segPress = wstate.segPress();
 
         for (auto wellID = 0*nWell; wellID < nWell; ++wellID) {
-            const auto* well     = wells[wellID];
+            const auto& well     = wells[wellID];
             const auto  topSegIx = wstate.topSegmentIndex(wellID);
             const auto  pressTop = 100.0 * wellID;
 
@@ -102,11 +101,11 @@ namespace {
 
             press[0] = pressTop;
 
-            if (! well->isMultiSegment(tstep)) {
+            if (! well.isMultiSegment()) {
                 continue;
             }
 
-            const auto& segSet = well->getWellSegments(tstep);
+            const auto& segSet = well.getSegments();
             const auto  nSeg   = segSet.size();
 
             for (auto segID = 0*nSeg + 1; segID < nSeg; ++segID) {
@@ -118,8 +117,7 @@ namespace {
     }
 
 
-    void setSegRates(const std::vector<const Opm::Well*>& wells,
-                     const std::size_t                    tstep,
+  void setSegRates(const std::vector<Opm::Well2>& wells,
                      const Opm::PhaseUsage&               pu,
                      Opm::WellStateFullyImplicitBlackoil& wstate)
     {
@@ -139,7 +137,7 @@ namespace {
         auto& segRates = wstate.segRates();
 
         for (auto wellID = 0*nWell; wellID < nWell; ++wellID) {
-            const auto* well     = wells[wellID];
+            const auto& well     = wells[wellID];
             const auto  topSegIx = wstate.topSegmentIndex(wellID);
             const auto  rateTop  = 1000.0 * wellID;
 
@@ -147,11 +145,11 @@ namespace {
             if (oil) { segRates[np*topSegIx + io] = rateTop; }
             if (gas) { segRates[np*topSegIx + ig] = rateTop; }
 
-            if (! well->isMultiSegment(tstep)) {
+            if (! well.isMultiSegment()) {
                 continue;
             }
 
-            const auto& segSet = well->getWellSegments(tstep);
+            const auto& segSet = well.getSegments();
             const auto  nSeg   = segSet.size();
 
             for (auto segID = 0*nSeg + 1; segID < nSeg; ++segID) {
@@ -181,10 +179,10 @@ BOOST_AUTO_TEST_CASE(Linearisation)
 
     BOOST_CHECK_EQUAL(wstate.numSegment(), 6 + 1);
 
-    const auto& wells = setup.sched.getWells(tstep);
+    const auto& wells = setup.sched.getWells2atEnd();
     BOOST_CHECK_EQUAL(wells.size(), 2);
 
-    const auto prod01_first = wells[0]->name() == "PROD01";
+    const auto prod01_first = wells[0].name() == "PROD01";
 
     BOOST_CHECK_EQUAL(wstate.topSegmentIndex(0), 0);
     BOOST_CHECK_EQUAL(wstate.topSegmentIndex(1),
@@ -200,10 +198,10 @@ BOOST_AUTO_TEST_CASE(Pressure)
 
     auto wstate = buildWellState(setup, tstep);
 
-    const auto& wells = setup.sched.getWells(tstep);
-    const auto prod01_first = wells[0]->name() == "PROD01";
+    const auto& wells = setup.sched.getWells2(tstep);
+    const auto prod01_first = wells[0].name() == "PROD01";
 
-    setSegPress(wells, tstep, wstate);
+    setSegPress(wells, wstate);
 
     const auto rpt = wstate.report(setup.pu, setup.grid.c_grid()->global_cell);
 
@@ -244,12 +242,12 @@ BOOST_AUTO_TEST_CASE(Rates)
 
     auto wstate = buildWellState(setup, tstep);
 
-    const auto& wells = setup.sched.getWells(tstep);
-    const auto prod01_first = wells[0]->name() == "PROD01";
+    const auto wells = setup.sched.getWells2(tstep);
+    const auto prod01_first = wells[0].name() == "PROD01";
 
     const auto& pu = setup.pu;
 
-    setSegRates(wells, tstep, pu, wstate);
+    setSegRates(wells, pu, wstate);
 
     const auto rpt = wstate.report(pu, setup.grid.c_grid()->global_cell);
 

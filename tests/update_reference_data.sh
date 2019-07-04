@@ -52,8 +52,19 @@ tests[spe1_metric_vfp1]="flow vfpprod_spe1 SPE1CASE1_METRIC_VFP1 spe1_metric_vfp
 tests[base_model_1]="flow model1 BASE_MODEL_1 base_model_1"
 tests[msw_model_1]="flow model1 MSW_MODEL_1 msw_model_1"
 tests[faults_model_1]="flow model1 FAULTS_MODEL_1 faults_model_1"
+tests[base_model2]="flow model2 0_BASE_MODEL2 base_model2"
+tests[multregt_model2]="flow model2 1_MULTREGT_MODEL2 multregt_model2"
+tests[multxyz_model2]="flow model2 2_MULTXYZ_MODEL2 multxyz_model2"
+tests[multflt_model2]="flow model2 3_MULTFLT_MODEL2 multflt_model2"
+tests[multpvv_model2]="flow model2 4_MINPVV_MODEL2 multpvv_model2"
+tests[swatinit_model2]="flow model2 5_SWATINIT_MODEL2 swatinit_model2"
+tests[endscale_model2]="flow model2 6_ENDSCALE_MODEL2 endscale_model2"
+tests[hysteresis_model2]="flow model2 7_HYSTERESIS_MODEL2 hysteresis_model2"
+tests[multiply_tranxyz_model2]="flow model2 8_MULTIPLY_TRANXYZ_MODEL2 multiply_tranxyz_model2"
+tests[editnnc_model2]="flow model2 9_EDITNNC_MODEL2 editnnc_model2"
 tests[polymer_injectivity]="flow polymer_injectivity 2D_POLYMER_INJECTIVITY"
 tests[nnc]="flow editnnc NNC_AND_EDITNNC nnc"
+tests[udq]="flow udq_actionx UDQ_WCONPROD"
 
 changed_tests=""
 for test_name in ${!tests[*]}
@@ -67,7 +78,7 @@ do
       $configuration/build-opm-simulators/tests/results/$binary+$tname/ \
       $OPM_TESTS_ROOT/$dirname/opm-simulation-reference/$binary \
       $casename \
-      EGRID INIT SMSPEC UNRST UNSMRY
+      EGRID INIT RFT SMSPEC UNRST UNSMRY
   test $? -eq 0 && changed_tests="$changed_tests $test_name"
 done
 

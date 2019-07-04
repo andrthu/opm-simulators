@@ -6,7 +6,7 @@
 #include <iostream>
 #include <utility>
 
-#include <opm/core/simulator/SimulatorReport.hpp>
+#include <opm/simulators/timestepping/SimulatorReport.hpp>
 #include <opm/grid/utility/StopWatch.hpp>
 #include <opm/common/OpmLog/OpmLog.hpp>
 #include <opm/common/utility/parameters/ParameterGroup.hpp>
@@ -219,8 +219,13 @@ namespace Opm {
                 const double dt = substepTimer.currentStepLength() ;
                 if (timestepVerbose_) {
                     std::ostringstream ss;
+                    boost::posix_time::time_facet* facet = new boost::posix_time::time_facet("%d-%b-%Y");
+                    ss.imbue(std::locale(std::locale::classic(), facet));
                     ss <<"\nTime step " << substepTimer.currentStepNum() << ", stepsize "
-                       << unit::convert::to(substepTimer.currentStepLength(), unit::day) << " days.";
+                       << unit::convert::to(substepTimer.currentStepLength(), unit::day) << " days,"
+                       << " at day " << (double)unit::convert::to(substepTimer.simulationTimeElapsed(), unit::day)
+                       << "/" << (double)unit::convert::to(substepTimer.totalTime(), unit::day)
+                       << ", date = " << substepTimer.currentDateTime();
                     OpmLog::info(ss.str());
                 }
 
@@ -322,7 +327,7 @@ namespace Opm {
                         Opm::time::StopWatch perfTimer;
                         perfTimer.start();
 
-                        ebosProblem.writeOutput(/*isSubStep=*/true);
+                        ebosProblem.writeOutput();
 
                         report.output_write_time += perfTimer.secsSinceStart();
                     }
@@ -491,6 +496,14 @@ namespace Opm {
             std::ostringstream msg;
             msg << "    Excessive chopping detected in report step "
                 << sr.back().report_step << ", substep " << sr.back().current_step << "\n";
+
+            std::set<std::string> failing_wells;
+
+            // return empty set if no report exists
+            // well failures in assembly is not yet registred
+            if(sr.back().report.empty())
+                return failing_wells;
+
             const auto& wfs = sr.back().report.back().wellFailures();
             for (const auto& wf : wfs) {
                 msg << "        Well that failed: " << wf.wellName() << "\n";
@@ -503,13 +516,12 @@ namespace Opm {
             const int rep_step = sr.back().report_step;
             const int sub_step = sr.back().current_step;
             const int sr_size = sr.size();
-            std::set<std::string> failing_wells;
             for (const auto& wf : wfs) {
                 failing_wells.insert(wf.wellName());
             }
             if (sr_size >= num_steps) {
-                for (int step = 1; step < num_steps; ++step) {
-                    const auto& srep = sr[sr_size - 1 - step];
+                for (int s = 1; s < num_steps; ++s) {
+                    const auto& srep = sr[sr_size - 1 - s];
                     // Report must be from same report step and substep, otherwise we have
                     // not chopped/retried enough times on this step.
                     if (srep.report_step != rep_step || srep.current_step != sub_step) {

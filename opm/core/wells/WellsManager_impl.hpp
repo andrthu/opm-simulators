@@ -102,19 +102,19 @@ getCubeDim(const C2F& c2f,
 namespace Opm
 {
 template<class C2F, class FC, class NTG>
-void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t timeStep,
-                                        const C2F& c2f,
+void WellsManager::createWellsFromSpecs(const std::vector<Well2>& wells, size_t timeStep,
+                                        const C2F& /* c2f */,
                                         const int* cart_dims,
-                                        FC begin_face_centroids,
+                                        FC /* begin_face_centroids */,
                                         int dimensions,
-                                        std::vector<double>& dz,
+                                        std::vector<double>& /* dz */,
                                         std::vector<std::string>& well_names,
                                         std::vector<WellData>& well_data,
                                         std::map<std::string, int>& well_names_to_index,
                                         const PhaseUsage& phaseUsage,
                                         const std::map<int,int>& cartesian_to_compressed,
-                                        const double* permeability,
-                                        const NTG& ntg,
+                                        const double* /* permeability */,
+                                        const NTG& /* ntg */,
                                         std::vector<int>& wells_on_proc,
                                         const std::unordered_set<std::string>& ignored_wells)
 {
@@ -134,13 +134,13 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
     // the index of the well according to the eclipse state
     int active_well_index = 0;
     for (auto wellIter= wells.begin(); wellIter != wells.end(); ++wellIter) {
-        const auto* well = (*wellIter);
+        const auto& well = (*wellIter);
 
-        if (well->getStatus(timeStep) == WellCommon::SHUT) {
+        if (well.getStatus() == WellCommon::SHUT) {
             continue;
         }
 
-        if ( ignored_wells.find(well->name()) != ignored_wells.end() ) {
+        if ( ignored_wells.find(well.name()) != ignored_wells.end() ) {
             wells_on_proc[ wellIter - wells.begin() ] = 0;
             continue;
         }
@@ -148,7 +148,7 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
         {   // COMPDAT handling
             // shut completions and open ones stored in this process will have 1 others 0.
 
-            for(const auto& completion : well->getConnections(timeStep)) {
+            for(const auto& completion : well.getConnections()) {
                 if (completion.state() == WellCompletion::OPEN) {
                     const int i = completion.getI();
                     const int j = completion.getJ();
@@ -159,7 +159,7 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
                     const std::map<int, int>::const_iterator cgit = cartesian_to_compressed.find(cart_grid_indx);
                     if (cgit == cartesian_to_compressed.end()) {
                         const std::string msg = ("Cell with i,j,k indices " + std::to_string(i) + " " + std::to_string(j)
-                                    + " " + std::to_string(k)  +  " not found in grid (well = " +  well->name() + ").");
+                                    + " " + std::to_string(k)  +  " not found in grid (well = " +  well.name() + ").");
                         OPM_THROW(std::runtime_error, msg);
                     }
                     else
@@ -181,25 +181,25 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
 
         if (wellperf_data[active_well_index].empty()) {
             const std::string msg = " there is no perforations associated with the well "
-                                  + well->name() + ", the well is ignored for the report step "
+                                  + well.name() + ", the well is ignored for the report step "
                                   + std::to_string(timeStep);
             OpmLog::warning(msg);
             wells_on_proc[wellIter - wells.begin()] = 0;
             continue;
         }
         {   // WELSPECS handling
-            well_names_to_index[well->name()] = active_well_index;
-            well_names.push_back(well->name());
+            well_names_to_index[well.name()] = active_well_index;
+            well_names.push_back(well.name());
             {
                 WellData wd;
-                wd.reference_bhp_depth = well->getRefDepth( timeStep );
+                wd.reference_bhp_depth = well.getRefDepth( );
                 wd.welspecsline = -1;
-                if (well->isInjector( timeStep ))
+                if (well.isInjector( ))
                     wd.type = INJECTOR;
                 else
                     wd.type = PRODUCER;
 
-                wd.allowCrossFlow = well->getAllowCrossFlow();
+                wd.allowCrossFlow = well.getAllowCrossFlow();
                 well_data.push_back(wd);
             }
         }
@@ -226,16 +226,16 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
     destroy_wells( w );
 
     // Add wells.
-    for (int w = 0; w < num_wells; ++w) {
-        const int           w_num_perf = wellperf_data[w].size();
+    for (int iw = 0; iw < num_wells; ++iw) {
+        const int           w_num_perf = wellperf_data[iw].size();
         std::vector<int>    perf_cells  (w_num_perf);
         std::vector<double> perf_prodind(w_num_perf);
         std::vector<int> perf_satnumid(w_num_perf);
 
         for (int perf = 0; perf < w_num_perf; ++perf) {
-            perf_cells  [perf] = wellperf_data[w][perf].cell;
-            perf_prodind[perf] = wellperf_data[w][perf].well_index;
-            perf_satnumid[perf] = wellperf_data[w][perf].satnumid;
+            perf_cells  [perf] = wellperf_data[iw][perf].cell;
+            perf_prodind[perf] = wellperf_data[iw][perf].well_index;
+            perf_satnumid[perf] = wellperf_data[iw][perf].satnumid;
         }
 
         const double* comp_frac = NULL;
@@ -243,21 +243,21 @@ void WellsManager::createWellsFromSpecs(std::vector<const Well*>& wells, size_t 
         // We initialize all wells with a null component fraction,
         // and must (for injection wells) overwrite it later.
         const int ok =
-            add_well(well_data[w].type,
-                     well_data[w].reference_bhp_depth,
+            add_well(well_data[iw].type,
+                     well_data[iw].reference_bhp_depth,
                      w_num_perf,
                      comp_frac,
                      perf_cells.data(),
                      perf_prodind.data(),
                      perf_satnumid.data(),
-                     well_names[w].c_str(),
-                     well_data[w].allowCrossFlow,
+                     well_names[iw].c_str(),
+                     well_data[iw].allowCrossFlow,
                      w_);
 
         if (!ok) {
             OPM_THROW(std::runtime_error,
                       "Failed adding well "
-                      << well_names[w]
+                      << well_names[iw]
                       << " to Wells data structure.");
         }
     }
@@ -267,6 +267,7 @@ template <class C2F, class FC>
 WellsManager::
 WellsManager(const Opm::EclipseState& eclipseState,
              const Opm::Schedule& schedule,
+             const Opm::SummaryState& summaryState,
              const size_t                    timeStep,
              int                             number_of_cells,
              const int*                      global_cell,
@@ -278,7 +279,7 @@ WellsManager(const Opm::EclipseState& eclipseState,
              const std::unordered_set<std::string>&    deactivated_wells)
     : w_(create_wells(0,0,0)), is_parallel_run_(is_parallel_run)
 {
-  init(eclipseState, schedule, timeStep, number_of_cells, global_cell,
+  init(eclipseState, schedule, summaryState, timeStep, number_of_cells, global_cell,
          cart_dims, dimensions,
          cell_to_faces, begin_face_centroids, deactivated_wells);
 }
@@ -288,6 +289,7 @@ template <class C2F, class FC>
 void
 WellsManager::init(const Opm::EclipseState& eclipseState,
                    const Opm::Schedule& schedule,
+                   const Opm::SummaryState& summaryState,
                    const size_t                    timeStep,
                    int                             number_of_cells,
                    const int*                      global_cell,
@@ -325,7 +327,7 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
     // For easy lookup:
     std::map<std::string, int> well_names_to_index;
 
-    auto wells           = schedule.getWells(timeStep);
+    const auto wells = schedule.getWells2(timeStep);
     std::vector<int> wells_on_proc;
 
     well_names.reserve(wells.size());
@@ -349,7 +351,6 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
         }
     }
 
-
     std::vector<double> interleavedPerm;
     RockFromDeck::extractInterleavedPermeability(eclipseState,
                                                  number_of_cells,
@@ -367,7 +368,7 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
                          pu, cartesian_to_compressed, interleavedPerm.data(), ntg,
                          wells_on_proc, deactivated_wells);
 
-    setupWellControls(wells, timeStep, well_names, pu, wells_on_proc);
+    setupWellControls(wells, summaryState, well_names, pu, wells_on_proc);
 
     {
         const auto& fieldGroup = schedule.getGroup( "FIELD" );
@@ -392,7 +393,7 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
     for (size_t i = 0; i < wells_on_proc.size(); ++i) {
         // wells_on_proc is a vector of flag to indicate whether a well is on the process
         if (wells_on_proc[i]) {
-            well_collection_.addWell(wells[i], timeStep, pu);
+            well_collection_.addWell(wells[i], summaryState, timeStep, pu);
         }
     }
 
@@ -400,7 +401,7 @@ WellsManager::init(const Opm::EclipseState& eclipseState,
 
     if (well_collection_.groupControlActive()) {
         // here does not consider the well potentials related guide rate setting
-        setupGuideRates(wells, timeStep, well_data, well_names_to_index);
+        setupGuideRates(wells, well_data, well_names_to_index);
     }
 
     // Debug output.

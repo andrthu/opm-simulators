@@ -194,18 +194,18 @@ public:
         if (!substep) {
             const auto& schedule = simulator_.vanguard().schedule();
             const auto& rft_config = schedule.rftConfig();
-            for (const auto& well: schedule.getWells(reportStepNum)) {
+            for (const auto& well: schedule.getWells2(reportStepNum)) {
 
                 // don't bother with wells not on this process
                 const auto& defunctWellNames = simulator_.vanguard().defunctWellNames();
-                if (defunctWellNames.find(well->name()) != defunctWellNames.end()) {
+                if (defunctWellNames.find(well.name()) != defunctWellNames.end()) {
                     continue;
                 }
 
                 if (!rft_config.active(reportStepNum))
                     continue;
 
-                for (const auto& connection: well->getConnections(reportStepNum)) {
+                for (const auto& connection: well.getConnections()) {
                     const size_t i = size_t(connection.getI());
                     const size_t j = size_t(connection.getJ());
                     const size_t k = size_t(connection.getK());
@@ -335,6 +335,16 @@ public:
             }
         }
 
+        // ROCKC
+        if (rstKeywords["ROCKC"] > 0) {
+            rstKeywords["ROCKC"] = 0;
+            rockCompPorvMultiplier_.resize(bufferSize, 0.0);
+            rockCompTransMultiplier_.resize(bufferSize, 0.0);
+            swMax_.resize(bufferSize, 0.0);
+            minimumOilPressure_.resize(bufferSize, 0.0);
+            overburdenPressure_.resize(bufferSize, 0.0);
+        }
+
         //Warn for any unhandled keyword
         if (log) {
             for (auto& keyValue: rstKeywords) {
@@ -367,6 +377,7 @@ public:
         if (!std::is_same<Discretization, Ewoms::EcfvDiscretization<TypeTag> >::value)
             return;
 
+        const auto& problem = elemCtx.simulator().problem();
         for (unsigned dofIdx = 0; dofIdx < elemCtx.numPrimaryDof(/*timeIdx=*/0); ++dofIdx) {
             const auto& intQuants = elemCtx.intensiveQuantities(dofIdx, /*timeIdx=*/0);
             const auto& fs = intQuants.fluidState();
@@ -495,9 +506,30 @@ public:
             }
 
             if (soMax_.size() > 0)
-                soMax_[globalDofIdx] = elemCtx.simulator().problem().maxOilSaturation(globalDofIdx);
+                soMax_[globalDofIdx] =
+                    std::max(Opm::getValue(fs.saturation(oilPhaseIdx)),
+                             problem.maxOilSaturation(globalDofIdx));
 
-            const auto& matLawManager = elemCtx.simulator().problem().materialLawManager();
+            if (swMax_.size() > 0)
+                swMax_[globalDofIdx] =
+                    std::max(Opm::getValue(fs.saturation(waterPhaseIdx)),
+                             problem.maxWaterSaturation(globalDofIdx));
+
+            if (minimumOilPressure_.size() > 0)
+                minimumOilPressure_[globalDofIdx] =
+                    std::min(Opm::getValue(fs.pressure(oilPhaseIdx)),
+                             problem.minOilPressure(globalDofIdx));
+
+            if (overburdenPressure_.size() > 0)
+                overburdenPressure_[globalDofIdx] = problem.overburdenPressure(globalDofIdx);
+
+            if (rockCompPorvMultiplier_.size() > 0)
+                rockCompPorvMultiplier_[globalDofIdx] = problem.template rockCompPoroMultiplier<Scalar>(intQuants, globalDofIdx);
+
+            if (rockCompTransMultiplier_.size() > 0)
+                rockCompTransMultiplier_[globalDofIdx] = problem.template rockCompTransMultiplier<Scalar>(intQuants, globalDofIdx);
+
+            const auto& matLawManager = problem.materialLawManager();
             if (matLawManager->enableHysteresis()) {
                 if (pcSwMdcOw_.size() > 0 && krnSwMdcOw_.size() > 0) {
                     matLawManager->oilWaterHysteresisParams(
@@ -525,7 +557,7 @@ public:
             // This can be removed when ebos has 100% controll over output
             if (elemCtx.simulator().episodeIndex() < 0 && FluidSystem::phaseIsActive(oilPhaseIdx) && FluidSystem::phaseIsActive(gasPhaseIdx)) {
 
-                const auto& fsInitial = elemCtx.simulator().problem().initialFluidState(globalDofIdx);
+                const auto& fsInitial = problem.initialFluidState(globalDofIdx);
 
                 // use initial rs and rv values
                 if (rv_.size() > 0)
@@ -575,8 +607,26 @@ public:
                         val.second = Opm::getValue(fs.saturation(waterPhaseIdx));
                     else if (key.first == "BGSAT")
                         val.second = Opm::getValue(fs.saturation(gasPhaseIdx));
+                    else if (key.first == "BOSAT")
+                        val.second = 1. - Opm::getValue(fs.saturation(gasPhaseIdx)) - Opm::getValue(fs.saturation(waterPhaseIdx));
                     else if (key.first == "BPR")
                         val.second = Opm::getValue(fs.pressure(oilPhaseIdx));
+                    else if (key.first == "BWKR" || key.first == "BKRW")
+                        val.second = Opm::getValue(intQuants.relativePermeability(waterPhaseIdx));
+                    else if (key.first == "BGKR" || key.first == "BKRG")
+                        val.second = Opm::getValue(intQuants.relativePermeability(gasPhaseIdx));
+                    else if (key.first == "BOKR" || key.first == "BKRO")
+                        val.second = Opm::getValue(intQuants.relativePermeability(oilPhaseIdx));
+                    else if (key.first == "BWPC")
+                        val.second = Opm::getValue(fs.pressure(oilPhaseIdx)) - Opm::getValue(fs.pressure(waterPhaseIdx));
+                    else if (key.first == "BGPC")
+                        val.second = Opm::getValue(fs.pressure(gasPhaseIdx)) - Opm::getValue(fs.pressure(oilPhaseIdx));
+                    else if (key.first == "BVWAT" || key.first == "BWVIS")
+                        val.second = Opm::getValue(fs.viscosity(waterPhaseIdx));
+                    else if (key.first == "BVGAS" || key.first == "BGVIS")
+                        val.second = Opm::getValue(fs.viscosity(gasPhaseIdx));
+                    else if (key.first == "BVOIL" || key.first == "BOVIS")
+                        val.second = Opm::getValue(fs.viscosity(oilPhaseIdx));
                     else {
                         std::string logstring = "Keyword '";
                         logstring.append(key.first);
@@ -680,24 +730,24 @@ public:
     {
         const auto& schedule = simulator_.vanguard().schedule();
         const auto& rft_config = schedule.rftConfig();
-        for (const auto& well: schedule.getWells(reportStepNum)) {
+        for (const auto& well: schedule.getWells2(reportStepNum)) {
 
             // don't bother with wells not on this process
             const auto& defunctWellNames = simulator_.vanguard().defunctWellNames();
-            if (defunctWellNames.find(well->name()) != defunctWellNames.end()) {
+            if (defunctWellNames.find(well.name()) != defunctWellNames.end()) {
                 continue;
             }
 
             //add data infrastructure for shut wells
-            if (!wellDatas.count(well->name())) {
+            if (!wellDatas.count(well.name())) {
                 Opm::data::Well wellData;
 
                 if (!rft_config.active(reportStepNum))
                     continue;
 
-                wellData.connections.resize(well->getConnections(reportStepNum).size());
+                wellData.connections.resize(well.getConnections().size());
                 size_t count = 0;
-                for (const auto& connection: well->getConnections(reportStepNum)) {
+                for (const auto& connection: well.getConnections()) {
                     const size_t i = size_t(connection.getI());
                     const size_t j = size_t(connection.getJ());
                     const size_t k = size_t(connection.getK());
@@ -707,10 +757,10 @@ public:
                     connectionData.index = index;
                     count++;
                 }
-                wellDatas.emplace(std::make_pair(well->name(), wellData));
+                wellDatas.emplace(std::make_pair(well.name(), wellData));
             }
 
-            Opm::data::Well& wellData = wellDatas.at(well->name());
+            Opm::data::Well& wellData = wellDatas.at(well.name());
             for (auto& connectionData: wellData.connections) {
                 const auto index = connectionData.index;
                 if (oilConnectionPressures_.count(index) > 0)
@@ -833,6 +883,23 @@ public:
         if (bubblePointPressure_.size() > 0)
             sol.insert ("PBUB", Opm::UnitSystem::measure::pressure, std::move(bubblePointPressure_), Opm::data::TargetType::RESTART_AUXILIARY);
 
+
+        if (swMax_.size() > 0)
+            sol.insert ("SWMAX", Opm::UnitSystem::measure::identity, std::move(swMax_), Opm::data::TargetType::RESTART_SOLUTION);
+
+        if (minimumOilPressure_.size() > 0)
+            sol.insert ("PRESROCC", Opm::UnitSystem::measure::pressure, std::move(minimumOilPressure_), Opm::data::TargetType::RESTART_SOLUTION);
+
+        if (overburdenPressure_.size() > 0)
+            sol.insert ("PRES_OVB", Opm::UnitSystem::measure::pressure, std::move(overburdenPressure_), Opm::data::TargetType::RESTART_SOLUTION);
+
+        if (rockCompPorvMultiplier_.size() > 0)
+            sol.insert ("PORV_RC", Opm::UnitSystem::measure::identity, std::move(rockCompPorvMultiplier_), Opm::data::TargetType::RESTART_SOLUTION);
+
+        if (rockCompTransMultiplier_.size() > 0)
+            sol.insert ("TMULT_RC", Opm::UnitSystem::measure::identity, std::move(rockCompTransMultiplier_), Opm::data::TargetType::RESTART_SOLUTION);
+
+
         // Fluid in place
         for (int i = 0; i<FipDataType::numFipValues; i++) {
             if (outputFipRestart_ && fip_[i].size() > 0) {
@@ -909,7 +976,7 @@ public:
                 miscSummaryData["FPR"] = pressureAverage_(fieldPressurePvHydrocarbon[0], fieldPvHydrocarbon[0], fieldPressurePv[0], fieldFipValues[FipDataType::PoreVolume], true);
 
             if (summaryConfig.hasKeyword("FPRP"))
-                miscSummaryData["FPR"] = pressureAverage_(fieldPressurePvHydrocarbon[0], fieldPvHydrocarbon[0], fieldPressurePv[0], fieldFipValues[FipDataType::PoreVolume], false);
+                miscSummaryData["FPRP"] = pressureAverage_(fieldPressurePvHydrocarbon[0], fieldPvHydrocarbon[0], fieldPressurePv[0], fieldFipValues[FipDataType::PoreVolume], false);
 
             // Region summary output
             for (int i = 0; i<FipDataType::numFipValues; i++) {
@@ -953,7 +1020,7 @@ public:
 
     }
 
-    void setRestart(const Opm::data::Solution& sol, unsigned elemIdx, unsigned globalDofIndex) 
+    void setRestart(const Opm::data::Solution& sol, unsigned elemIdx, unsigned globalDofIndex)
     {
         Scalar so = 1.0;
         if (saturation_[waterPhaseIdx].size() > 0 && sol.has("SWAT")) {
@@ -1164,7 +1231,7 @@ private:
                 // Gas dissolved in oil and vaporized oil
                 Scalar gasInPlaceLiquid = Opm::getValue(fs.Rs()) * fip[oilPhaseIdx];
                 Scalar oilInPlaceGas = Opm::getValue(fs.Rv()) * fip[gasPhaseIdx];
-                if (fip_[FipDataType::GasInPlaceInGasPhase].size() > 0)
+                if (fip_[FipDataType::GasInPlaceInLiquidPhase].size() > 0)
                     fip_[FipDataType::GasInPlaceInLiquidPhase][globalDofIdx] = gasInPlaceLiquid;
                 if (fip_[FipDataType::OilInPlaceInGasPhase].size() > 0)
                     fip_[FipDataType::OilInPlaceInGasPhase][globalDofIdx] = oilInPlaceGas;
@@ -1400,6 +1467,12 @@ private:
     ScalarBuffer ppcw_;
     ScalarBuffer bubblePointPressure_;
     ScalarBuffer dewPointPressure_;
+    ScalarBuffer rockCompPorvMultiplier_;
+    ScalarBuffer rockCompTransMultiplier_;
+    ScalarBuffer swMax_;
+    ScalarBuffer overburdenPressure_;
+    ScalarBuffer minimumOilPressure_;
+
     std::vector<int> failedCellsPb_;
     std::vector<int> failedCellsPd_;
     std::vector<int> fipnum_;

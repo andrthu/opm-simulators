@@ -200,11 +200,12 @@ namespace Opm
     /// Construct wells from deck.
     WellsManager::WellsManager(const Opm::EclipseState& eclipseState,
                                const Opm::Schedule& schedule,
+                               const SummaryState& summaryState,
                                const size_t timeStep,
                                const UnstructuredGrid& grid)
         : w_(create_wells(0,0,0)), is_parallel_run_(false)
     {
-        init(eclipseState, schedule, timeStep, UgGridHelpers::numCells(grid),
+        init(eclipseState, schedule, summaryState, timeStep, UgGridHelpers::numCells(grid),
              UgGridHelpers::globalCell(grid), UgGridHelpers::cartDims(grid),
              UgGridHelpers::dimensions(grid),
              UgGridHelpers::cell2Faces(grid), UgGridHelpers::beginFaceCentroids(grid),
@@ -291,42 +292,44 @@ namespace Opm
 
 
 
-    void WellsManager::setupWellControls(std::vector< const Well* >& wells, size_t timeStep,
-                                         std::vector<std::string>& well_names, const PhaseUsage& phaseUsage,
+    void WellsManager::setupWellControls(const std::vector<Well2>& wells,
+                                         const SummaryState& summaryState,
+                                         std::vector<std::string>& well_names,
+                                         const PhaseUsage& phaseUsage,
                                          const std::vector<int>& wells_on_proc) {
         int well_index = 0;
         auto well_on_proc = wells_on_proc.begin();
 
-        for (auto wellIter= wells.begin(); wellIter != wells.end(); ++wellIter, ++well_on_proc) {
+        for (auto wellIter = wells.begin(); wellIter != wells.end(); ++wellIter, ++well_on_proc) {
             if( ! *well_on_proc )
             {
                 // Wells not stored on the process are not in the list
                 continue;
             }
 
-            const auto* well = (*wellIter);
+            const auto& well = (*wellIter);
 
-            if (well->getStatus(timeStep) == WellCommon::SHUT) {
+            if (well.getStatus() == WellCommon::SHUT) {
                 //SHUT wells are not added to the well list
                 continue;
             }
 
-            if (well->getStatus(timeStep) == WellCommon::STOP) {
+            if (well.getStatus() == WellCommon::STOP) {
                 // Stopped wells are kept in the well list but marked as stopped.
                 well_controls_stop_well(w_->ctrls[well_index]);
             }
 
 
-            if (well->isInjector(timeStep)) {
-                const WellInjectionProperties& injectionProperties = well->getInjectionProperties(timeStep);
+            if (well.isInjector()) {
+                const auto controls = well.injectionControls(summaryState);
                 int ok = 1;
                 int control_pos[5] = { -1, -1, -1, -1, -1 };
-                                
+
                 clear_well_controls(well_index, w_);
-                if (injectionProperties.hasInjectionControl(WellInjector::RATE)) {
+                if (controls.hasControl(WellInjector::RATE)) {
                     control_pos[WellsManagerDetail::InjectionControl::RATE] = well_controls_get_num(w_->ctrls[well_index]);
                     double distr[3] = { 0.0, 0.0, 0.0 };
-                    WellInjector::TypeEnum injectorType = injectionProperties.injectorType;
+                    WellInjector::TypeEnum injectorType = controls.injector_type;
 
                     if (injectorType == WellInjector::TypeEnum::WATER) {
                         distr[phaseUsage.phase_pos[BlackoilPhases::Aqua]] = 1.0;
@@ -337,7 +340,7 @@ namespace Opm
                     }
 
                     ok = append_well_controls(SURFACE_RATE,
-                                              injectionProperties.surfaceInjectionRate, 
+                                              controls.surface_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -345,10 +348,10 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && injectionProperties.hasInjectionControl(WellInjector::RESV)) {
+                if (ok && controls.hasControl(WellInjector::RESV)) {
                     control_pos[WellsManagerDetail::InjectionControl::RESV] = well_controls_get_num(w_->ctrls[well_index]);
                     double distr[3] = { 0.0, 0.0, 0.0 };
-                    WellInjector::TypeEnum injectorType = injectionProperties.injectorType;
+                    WellInjector::TypeEnum injectorType = controls.injector_type;
 
                     if (injectorType == WellInjector::TypeEnum::WATER) {
                         distr[phaseUsage.phase_pos[BlackoilPhases::Aqua]] = 1.0;
@@ -359,7 +362,7 @@ namespace Opm
                     }
 
                     ok = append_well_controls(RESERVOIR_RATE,
-                                              injectionProperties.reservoirInjectionRate, 
+                                              controls.reservoir_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -367,10 +370,10 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && injectionProperties.hasInjectionControl(WellInjector::BHP)) {
+                if (ok && controls.hasControl(WellInjector::BHP)) {
                     control_pos[WellsManagerDetail::InjectionControl::BHP] = well_controls_get_num(w_->ctrls[well_index]);
                     ok = append_well_controls(BHP,
-                                              injectionProperties.BHPLimit,
+                                              controls.bhp_limit,
                                               invalid_alq,
                                               invalid_vfp,
                                               NULL,
@@ -378,10 +381,10 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && injectionProperties.hasInjectionControl(WellInjector::THP)) {
+                if (ok && controls.hasControl(WellInjector::THP)) {
                     control_pos[WellsManagerDetail::InjectionControl::THP] = well_controls_get_num(w_->ctrls[well_index]);
-                    const double thp_limit  = injectionProperties.THPLimit;
-                    const int    vfp_number = injectionProperties.VFPTableNumber;
+                    const double thp_limit  = controls.thp_limit;
+                    const int    vfp_number = controls.vfp_table_number;
                     ok = append_well_controls(THP,
                                               thp_limit,
                                               invalid_alq,
@@ -395,8 +398,8 @@ namespace Opm
                     OPM_THROW(std::runtime_error, "Failure occured appending controls for well " << well_names[well_index]);
                 }
 
-                if (injectionProperties.controlMode != WellInjector::CMODE_UNDEFINED) {
-                    WellsManagerDetail::InjectionControl::Mode mode = WellsManagerDetail::InjectionControl::mode( injectionProperties.controlMode );
+                if (controls.cmode != WellInjector::CMODE_UNDEFINED) {
+                    WellsManagerDetail::InjectionControl::Mode mode = WellsManagerDetail::InjectionControl::mode(controls.cmode);
                     int cpos = control_pos[mode];
                     if (cpos == -1 && mode != WellsManagerDetail::InjectionControl::GRUP) {
                         OPM_THROW(std::runtime_error, "Control not specified in well " << well_names[well_index]);
@@ -408,7 +411,7 @@ namespace Opm
                 // Set well component fraction.
                 double cf[3] = { 0.0, 0.0, 0.0 };
                 {
-                    WellInjector::TypeEnum injectorType = injectionProperties.injectorType;
+                    WellInjector::TypeEnum injectorType = controls.injector_type;
 
                     if (injectorType == WellInjector::WATER) {
                         if (!phaseUsage.phase_used[BlackoilPhases::Aqua]) {
@@ -430,16 +433,16 @@ namespace Opm
                 }
             }
 
-            if (well->isProducer(timeStep)) {
+            if (well.isProducer( )) {
                 // Add all controls that are present in well.
                 // First we must clear existing controls, in case the
                 // current WCONPROD line is modifying earlier controls.
-                const WellProductionProperties& productionProperties = well->getProductionProperties(timeStep);
+                const auto controls = well.productionControls(summaryState);
                 int control_pos[9] = { -1, -1, -1, -1, -1, -1, -1, -1, -1 };
                 int ok = 1;
-                
+
                 clear_well_controls(well_index, w_);
-                if (ok && productionProperties.hasProductionControl(WellProducer::ORAT)) {
+                if (ok && controls.hasControl(WellProducer::ORAT)) {
                     if (!phaseUsage.phase_used[BlackoilPhases::Liquid]) {
                         OPM_THROW(std::runtime_error, "Oil phase not active and ORAT control specified.");
                     }
@@ -448,7 +451,7 @@ namespace Opm
                     double distr[3] = { 0.0, 0.0, 0.0 };
                     distr[phaseUsage.phase_pos[BlackoilPhases::Liquid]] = 1.0;
                     ok = append_well_controls(SURFACE_RATE,
-                                              -productionProperties.OilRate,
+                                              -controls.oil_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -456,7 +459,7 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && productionProperties.hasProductionControl(WellProducer::WRAT)) {
+                if (ok && controls.hasControl(WellProducer::WRAT)) {
                     if (!phaseUsage.phase_used[BlackoilPhases::Aqua]) {
                         OPM_THROW(std::runtime_error, "Water phase not active and WRAT control specified.");
                     }
@@ -464,7 +467,7 @@ namespace Opm
                     double distr[3] = { 0.0, 0.0, 0.0 };
                     distr[phaseUsage.phase_pos[BlackoilPhases::Aqua]] = 1.0;
                     ok = append_well_controls(SURFACE_RATE,
-                                              -productionProperties.WaterRate, 
+                                              -controls.water_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -472,7 +475,7 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && productionProperties.hasProductionControl(WellProducer::GRAT)) {
+                if (ok && controls.hasControl(WellProducer::GRAT)) {
                     if (!phaseUsage.phase_used[BlackoilPhases::Vapour]) {
                         OPM_THROW(std::runtime_error, "Gas phase not active and GRAT control specified.");
                     }
@@ -480,7 +483,7 @@ namespace Opm
                     double distr[3] = { 0.0, 0.0, 0.0 };
                     distr[phaseUsage.phase_pos[BlackoilPhases::Vapour]] = 1.0;
                     ok = append_well_controls(SURFACE_RATE,
-                                              -productionProperties.GasRate,
+                                              -controls.gas_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -488,7 +491,7 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && productionProperties.hasProductionControl(WellProducer::LRAT)) {
+                if (ok && controls.hasControl(WellProducer::LRAT)) {
                     if (!phaseUsage.phase_used[BlackoilPhases::Aqua]) {
                         OPM_THROW(std::runtime_error, "Water phase not active and LRAT control specified.");
                     }
@@ -500,7 +503,7 @@ namespace Opm
                     distr[phaseUsage.phase_pos[BlackoilPhases::Aqua]] = 1.0;
                     distr[phaseUsage.phase_pos[BlackoilPhases::Liquid]] = 1.0;
                     ok = append_well_controls(SURFACE_RATE,
-                                              -productionProperties.LiquidRate,
+                                              -controls.liquid_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -508,11 +511,11 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && productionProperties.hasProductionControl(WellProducer::RESV)) {
+                if (ok && controls.hasControl(WellProducer::RESV)) {
                     control_pos[WellsManagerDetail::ProductionControl::RESV] = well_controls_get_num(w_->ctrls[well_index]);
                     double distr[3] = { 1.0, 1.0, 1.0 };
                     ok = append_well_controls(RESERVOIR_RATE,
-                                              -productionProperties.ResVRate,
+                                              -controls.resv_rate,
                                               invalid_alq,
                                               invalid_vfp,
                                               distr,
@@ -520,10 +523,10 @@ namespace Opm
                                               w_);
                 }
 
-                if (ok && productionProperties.hasProductionControl(WellProducer::THP)) {
-                    const double thp_limit  = productionProperties.THPLimit;
-                    const double alq_value  = productionProperties.ALQValue;
-                    const int    vfp_number = productionProperties.VFPTableNumber;
+                if (ok && controls.hasControl(WellProducer::THP)) {
+                    const double thp_limit  = controls.thp_limit;
+                    const double alq_value  = controls.alq_value;
+                    const int    vfp_number = controls.vfp_table_number;
                     control_pos[WellsManagerDetail::ProductionControl::THP] = well_controls_get_num(w_->ctrls[well_index]);
                     ok = append_well_controls(THP,
                                               thp_limit,
@@ -535,7 +538,7 @@ namespace Opm
                 }
 
                 if (ok) {
-                    const double bhp_limit = productionProperties.BHPLimit;
+                    const double bhp_limit = controls.bhp_limit;
                     control_pos[WellsManagerDetail::ProductionControl::BHP] = well_controls_get_num(w_->ctrls[well_index]);
                     ok = append_well_controls(BHP,
                                               bhp_limit,
@@ -550,8 +553,8 @@ namespace Opm
                     OPM_THROW(std::runtime_error, "Failure occured appending controls for well " << well_names[well_index]);
                 }
 
-                if (productionProperties.controlMode != WellProducer::CMODE_UNDEFINED) {
-                    WellsManagerDetail::ProductionControl::Mode mode = WellsManagerDetail::ProductionControl::mode(productionProperties.controlMode);
+                if (controls.cmode != WellProducer::CMODE_UNDEFINED) {
+                    WellsManagerDetail::ProductionControl::Mode mode = WellsManagerDetail::ProductionControl::mode(controls.cmode);
                     int cpos = control_pos[mode];
                     if (cpos == -1 && mode != WellsManagerDetail::ProductionControl::GRUP) {
                         OPM_THROW(std::runtime_error, "Control mode type " << mode << " not present in well " << well_names[well_index]);
@@ -564,7 +567,7 @@ namespace Opm
                 // Set well component fraction to match preferred phase for the well.
                 double cf[3] = { 0.0, 0.0, 0.0 };
                 {
-                    switch (well->getPreferredPhase()) {
+                    switch (well.getPreferredPhase()) {
                     case Phase::WATER:
                         if (!phaseUsage.phase_used[BlackoilPhases::Aqua]) {
                             OPM_THROW(std::runtime_error, "Water phase not used, yet found water-preferring well.");
@@ -584,7 +587,7 @@ namespace Opm
                         cf[phaseUsage.phase_pos[BlackoilPhases::Vapour]] = 1.0;
                         break;
                     default:
-                        OPM_THROW(std::logic_error, "Unknown preferred phase: " << well->getPreferredPhase());
+                        OPM_THROW(std::logic_error, "Unknown preferred phase: " << well.getPreferredPhase());
                     }
                     std::copy(cf, cf + phaseUsage.num_phases, w_->comp_frac + well_index*phaseUsage.num_phases);
                 }
@@ -595,39 +598,39 @@ namespace Opm
     }
 
     // only handle the guide rates from the keyword WGRUPCON
-    void WellsManager::setupGuideRates(std::vector< const Well* >& wells, const size_t timeStep, std::vector<WellData>& well_data, std::map<std::string, int>& well_names_to_index)
+    void WellsManager::setupGuideRates(const std::vector<Well2>& wells, std::vector<WellData>& well_data, std::map<std::string, int>& well_names_to_index)
     {
         for (auto wellIter = wells.begin(); wellIter != wells.end(); ++wellIter ) {
-            const auto* well = *wellIter;
+            const auto& well = *wellIter;
 
-            if (well->getStatus(timeStep) == WellCommon::SHUT) {
+            if (well.getStatus() == WellCommon::SHUT) {
                 //SHUT wells does not need guide rates
                 continue;
             }
 
-            const int wix = well_names_to_index[well->name()];
+            const int wix = well_names_to_index[well.name()];
             WellNode& wellnode = *well_collection_.getLeafNodes()[wix];
 
             // TODO: looks like only handling OIL phase guide rate for producers
-            if (well->getGuideRatePhase(timeStep) != GuideRate::UNDEFINED && well->getGuideRate(timeStep) >= 0.) {
+            if (well.getGuideRatePhase() != GuideRate::UNDEFINED && well.getGuideRate() >= 0.) {
                 if (well_data[wix].type == PRODUCER) {
-                    wellnode.prodSpec().guide_rate_ = well->getGuideRate(timeStep);
-                    if (well->getGuideRatePhase(timeStep) == GuideRate::OIL) {
+                    wellnode.prodSpec().guide_rate_ = well.getGuideRate();
+                    if (well.getGuideRatePhase() == GuideRate::OIL) {
                         wellnode.prodSpec().guide_rate_type_ = ProductionSpecification::OIL;
                     } else {
-                        OPM_THROW(std::runtime_error, "Guide rate type " << GuideRate::GuideRatePhaseEnum2String(well->getGuideRatePhase(timeStep)) << " specified for producer "
-                                  << well->name() << " in WGRUPCON, cannot handle.");
+                        OPM_THROW(std::runtime_error, "Guide rate type " << GuideRate::GuideRatePhaseEnum2String(well.getGuideRatePhase()) << " specified for producer "
+                                  << well.name() << " in WGRUPCON, cannot handle.");
                     }
                 } else if (well_data[wix].type == INJECTOR) {
-                    wellnode.injSpec().guide_rate_ = well->getGuideRate(timeStep);
-                    if (well->getGuideRatePhase(timeStep) == GuideRate::RAT) {
+                    wellnode.injSpec().guide_rate_ = well.getGuideRate();
+                    if (well.getGuideRatePhase() == GuideRate::RAT) {
                         wellnode.injSpec().guide_rate_type_ = InjectionSpecification::RAT;
                     } else {
-                        OPM_THROW(std::runtime_error, "Guide rate type " << GuideRate::GuideRatePhaseEnum2String(well->getGuideRatePhase(timeStep)) << " specified for injector "
-                                  << well->name() << " in WGRUPCON, cannot handle.");
+                        OPM_THROW(std::runtime_error, "Guide rate type " << GuideRate::GuideRatePhaseEnum2String(well.getGuideRatePhase()) << " specified for injector "
+                                  << well.name() << " in WGRUPCON, cannot handle.");
                     }
                 } else {
-                    OPM_THROW(std::runtime_error, "Unknown well type " << well_data[wix].type << " for well " << well->name());
+                    OPM_THROW(std::runtime_error, "Unknown well type " << well_data[wix].type << " for well " << well.name());
                 }
             } else {
                 wellnode.setIsGuideRateWellPotential(true);

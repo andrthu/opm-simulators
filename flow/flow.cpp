@@ -29,12 +29,12 @@
 #include <flow/flow_ebos_oilwater_polymer.hpp>
 #include <flow/flow_ebos_oilwater_polymer_injectivity.hpp>
 
-#include <opm/autodiff/SimulatorFullyImplicitBlackoilEbos.hpp>
-#include <opm/autodiff/FlowMainEbos.hpp>
-#include <opm/autodiff/moduleVersion.hpp>
+#include <opm/simulators/flow/SimulatorFullyImplicitBlackoilEbos.hpp>
+#include <opm/simulators/flow/FlowMainEbos.hpp>
+#include <opm/simulators/utils/moduleVersion.hpp>
 #include <ewoms/common/propertysystem.hh>
 #include <ewoms/common/parametersystem.hh>
-#include <opm/autodiff/MissingFeatures.hpp>
+#include <opm/simulators/flow/MissingFeatures.hpp>
 #include <opm/material/common/ResetLocale.hpp>
 
 #include <opm/parser/eclipse/Deck/Deck.hpp>
@@ -46,6 +46,7 @@
 #include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
 #include <opm/parser/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
 
+#include <opm/parser/eclipse/EclipseState/Schedule/ArrayDimChecker.hpp>
 
 #if HAVE_DUNE_FEM
 #include <dune/fem/misc/mpimanager.hh>
@@ -99,12 +100,12 @@ namespace detail
     // the call is intercepted by this function which will print "flow $version"
     // on stdout and exit(0).
     void handleVersionCmdLine(int argc, char** argv) {
-        if (argc != 2)
-            return;
-
-        if (std::strcmp(argv[1], "--version") == 0) {
-            std::cout << "flow " << Opm::moduleVersionName() << std::endl;
-            std::exit(EXIT_SUCCESS);
+        for ( int i = 1; i < argc; ++i )
+        {
+            if (std::strcmp(argv[i], "--version") == 0) {
+                std::cout << "flow " << Opm::moduleVersionName() << std::endl;
+                std::exit(EXIT_SUCCESS);
+            }
         }
     }
 
@@ -162,7 +163,11 @@ int main(int argc, char** argv)
         deckFilename = PreVanguard::canonicalDeckPath(deckFilename).string();
     }
     catch (const std::exception& e) {
-        std::cerr << "Exception received: " << e.what() << ". Try '--help' for a usage description.\n";
+        if ( mpiRank == 0 )
+            std::cerr << "Exception received: " << e.what() << ". Try '--help' for a usage description.\n";
+#if HAVE_MPI
+        MPI_Finalize();
+#endif
         return 1;
     }
 
@@ -203,6 +208,8 @@ int main(int argc, char** argv)
             eclipseState.reset( new Opm::EclipseState(*deck, parseContext, errorGuard ));
             schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
             summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
+
+            Opm::checkConsistentArrayDimensions(*eclipseState, *schedule, parseContext, errorGuard);
 
             if (errorGuard) {
                 errorGuard.dump();
@@ -292,7 +299,7 @@ int main(int argc, char** argv)
             std::cerr << "Failed to create valid EclipseState object." << std::endl;
             std::cerr << "Exception caught: " << e.what() << std::endl;
         }
-        throw;
+        return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
