@@ -385,7 +385,7 @@ protected:
 #endif
 
             // Communicate if parallel.
-            parallelInformation_arg.copyOwnerToAll(istlb, istlb);
+	    parallelInformation_arg.project(istlb);
 
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
@@ -653,7 +653,7 @@ protected:
             typedef Dune::FieldMatrix<Scalar, numEq, numEq >        MatrixBlockType;
             MatrixBlockType diag_block(0.0);
             for (int eq = 0; eq < numEq; ++eq)
-                diag_block[eq][eq] = 1.0e100;
+                diag_block[eq][eq] = 1.0;
 
             //loop over precalculated overlap rows and columns
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
