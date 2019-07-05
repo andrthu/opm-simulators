@@ -241,14 +241,12 @@ protected:
             parameters_.template init<TypeTag>();
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
 
-            //detail::findOverlapRowsAndColumns(simulator_.vanguard().grid(),overlapRowAndColumns_);
-
 	    const auto wellsForConn = simulator_.vanguard().schedule().getWells2atEnd();
 	    const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
 	    const auto gridForConn = simulator_.vanguard().grid();
 
 	    detail::setWellConnections(gridForConn, wellsForConn, useWellConn, wellConnectionsGraph_);
-	    detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns2_, interiorRowAndColumns_, wellConnectionsGraph_);
+	    detail::findOverlapAndInterior(gridForConn, overlapRowAndColumns_, interiorRowAndColumns_, wellConnectionsGraph_);
 
 	    // Construct noGhostMat_ adjecency pattern 
 	    noGhostAdjecency();
@@ -711,7 +709,7 @@ protected:
 	    noGhostMat_->endindices();
 	}
 
-	/// Set the ghost diagonal to Block(1.0)
+	/// Set the ghost diagonal to diag(1.0)
 	void setGhostsInNoGhost(Matrix& ng)
 	{
             ng=0;
@@ -721,7 +719,7 @@ protected:
                 diag_block[eq][eq] = 1.0;
 
             //loop over precalculated ghost rows and columns
-            for (auto row = overlapRowAndColumns2_.begin(); row != overlapRowAndColumns2_.end(); row++ )
+            for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
             {
                 int lcell = row->first;
                 //diagonal block set to 1
@@ -749,7 +747,7 @@ protected:
 	}
 
         /// Zero out off-diagonal blocks on rows corresponding to overlap cells
-        /// Diagonal blocks on ovelap rows are set to diag(1e100).
+        /// Diagonal blocks on ovelap rows are set to diag(1).
         void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
         {
             //value to set on diagonal
@@ -973,8 +971,7 @@ protected:
         Vector *rhs_;
         std::unique_ptr<Matrix> matrix_for_preconditioner_;
 
-        std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
-	std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns2_;
+        std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
 	std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
 	std::vector<std::set<int>> wellConnectionsGraph_;
  

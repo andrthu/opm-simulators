@@ -38,7 +38,7 @@ namespace detail
     /// \param overlapRowAndColumns List where overlap rows and columns are stored.
     template <class Grid>
     void findOverlapRowsAndColumns(const Grid& grid,
-                                   std::vector<std::pair<int, std::vector<int>>>& overlapRowAndColumns)
+                                   std::vector<std::pair<int, std::set<int>>>& overlapRowAndColumns)
     {
         // only relevant in parallel case.
         if (grid.comm().size() > 1) {
@@ -58,7 +58,7 @@ namespace detail
                     // local id of overlap cell
                     int lcell = lid.id(elem);
 
-                    std::vector<int> columns;
+                    std::set<int> columns;
                     // loop over faces of cell
                     auto isend = gridView.iend(elem);
                     for (auto is = gridView.ibegin(elem); is != isend; ++is) {
@@ -66,11 +66,11 @@ namespace detail
                         if (is->neighbor()) {
                             // get index of neighbor cell
                             int ncell = lid.id(is->outside());
-                            columns.push_back(ncell);
+                            columns.insert(ncell);
                         }
                     }
                     // add row to list
-                    overlapRowAndColumns.push_back(std::pair<int, std::vector<int>>(lcell, columns));
+                    overlapRowAndColumns.push_back(std::pair<int, std::set<int>>(lcell, columns));
                 }
             }
         }
