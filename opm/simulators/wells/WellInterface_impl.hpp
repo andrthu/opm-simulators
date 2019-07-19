@@ -605,10 +605,11 @@ namespace Opm
 
 
     template<typename TypeTag>
-    typename WellInterface<TypeTag>::RatioCheckTuple
+    void
     WellInterface<TypeTag>::
     checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits,
-                          const WellState& well_state) const
+                          const WellState& well_state,
+                          RatioLimitCheckReport& report) const
     {
 
         assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
@@ -635,17 +636,12 @@ namespace Opm
         const double max_water_cut_limit = econ_production_limits.maxWaterCut();
         assert(max_water_cut_limit > 0.);
 
-        const bool water_cut_limit_violated = checkMaxRatioLimitWell(well_state, max_water_cut_limit, waterCut);
+        const bool watercut_limit_violated = checkMaxRatioLimitWell(well_state, max_water_cut_limit, waterCut);
 
-        int worst_offending_completion = INVALIDCOMPLETION;
-        double violation_extent = -1.;
-
-        if (water_cut_limit_violated) {
-            checkMaxRatioLimitCompletions(well_state, max_water_cut_limit, waterCut,
-                                          worst_offending_completion, violation_extent);
+        if (watercut_limit_violated) {
+            report.ratio_limit_violated = true;
+            checkMaxRatioLimitCompletions(well_state, max_water_cut_limit, waterCut, report);
         }
-
-        return std::make_tuple(water_cut_limit_violated, worst_offending_completion, violation_extent);
     }
 
 
@@ -653,10 +649,62 @@ namespace Opm
 
 
     template<typename TypeTag>
-    typename WellInterface<TypeTag>::RatioCheckTuple
+    void
+    WellInterface<TypeTag>::
+    checkMaxGORLimit(const WellEconProductionLimits& econ_production_limits,
+                     const WellState& well_state,
+                     RatioLimitCheckReport& report) const
+    {
+
+        assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
+        assert(FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx));
+
+        // function to calculate gor based on rates
+        auto gor = [](const std::vector<double>& rates,
+                      const PhaseUsage& pu) {
+
+            const double oil_rate = rates[pu.phase_pos[Oil]];
+            const double gas_rate = rates[pu.phase_pos[Gas]];
+
+            // both rate should be in the same direction
+            assert(oil_rate * gas_rate >= 0.);
+
+            double gas_oil_ratio = 0.;
+
+            if (oil_rate != 0.) {
+                gas_oil_ratio = gas_rate / oil_rate;
+            } else {
+                if (gas_rate != 0.) {
+                    gas_oil_ratio = 1.e100; // big value to mark it as violated
+                } else {
+                    gas_oil_ratio = 0.0;
+                }
+            }
+
+            return gas_oil_ratio;
+        };
+
+        const double max_gor_limit = econ_production_limits.maxGasOilRatio();
+        assert(max_gor_limit > 0.);
+
+        const bool gor_limit_violated = checkMaxRatioLimitWell(well_state, max_gor_limit, gor);
+
+        if (gor_limit_violated) {
+            report.ratio_limit_violated = true;
+            checkMaxRatioLimitCompletions(well_state, max_gor_limit, gor, report);
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
     WellInterface<TypeTag>::
     checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits,
                          const WellState& well_state,
+                         RatioLimitCheckReport& report,
                          Opm::DeferredLogger& deferred_logger) const
     {
         // TODO: not sure how to define the worst-offending completion when more than one
@@ -667,25 +715,12 @@ namespace Opm
         //       Among the worst-offending completions, we use the one has the biggest violation
         //       extent.
 
-        bool any_limit_violated = false;
-        int worst_offending_completion = INVALIDCOMPLETION;
-        double violation_extent = -1.0;
-
         if (econ_production_limits.onMaxWaterCut()) {
-            const RatioCheckTuple water_cut_return = checkMaxWaterCutLimit(econ_production_limits, well_state);
-            bool water_cut_violated = std::get<0>(water_cut_return);
-            if (water_cut_violated) {
-                any_limit_violated = true;
-                const double violation_extent_water_cut = std::get<2>(water_cut_return);
-                if (violation_extent_water_cut > violation_extent) {
-                    violation_extent = violation_extent_water_cut;
-                    worst_offending_completion = std::get<1>(water_cut_return);
-                }
-            }
+            checkMaxWaterCutLimit(econ_production_limits, well_state, report);
         }
 
         if (econ_production_limits.onMaxGasOilRatio()) {
-            deferred_logger.warning("NOT_SUPPORTING_MAX_GOR", "the support for max Gas-Oil ratio is not implemented yet!");
+            checkMaxGORLimit(econ_production_limits, well_state, report);
         }
 
         if (econ_production_limits.onMaxWaterGasRatio()) {
@@ -696,12 +731,10 @@ namespace Opm
             deferred_logger.warning("NOT_SUPPORTING_MAX_GLR", "the support for max Gas-Liquid ratio is not implemented yet!");
         }
 
-        if (any_limit_violated) {
-            assert(worst_offending_completion != INVALIDCOMPLETION);
-            assert(violation_extent > 1.);
+        if (report.ratio_limit_violated) {
+            assert(report.worst_offending_completion != INVALIDCOMPLETION);
+            assert(report.violation_extent > 1.);
         }
-
-        return std::make_tuple(any_limit_violated, worst_offending_completion, violation_extent);
     }
 
 
@@ -738,11 +771,9 @@ namespace Opm
     checkMaxRatioLimitCompletions(const WellState& well_state,
                                   const double max_ratio_limit,
                                   const RatioFunc& ratioFunc,
-                                  int& worst_offending_completion,
-                                  double& violation_extent) const
+                                  RatioLimitCheckReport& report) const
     {
-        worst_offending_completion = INVALIDCOMPLETION;
-        violation_extent = -1.0;
+        int worst_offending_completion = INVALIDCOMPLETION;
 
         // the maximum water cut value of the completions
         // it is used to identify the most offending completion
@@ -775,7 +806,13 @@ namespace Opm
 
         assert(max_ratio_completion > max_ratio_limit);
         assert(worst_offending_completion != INVALIDCOMPLETION);
-        violation_extent = max_ratio_completion / max_ratio_limit;
+        const double violation_extent = max_ratio_completion / max_ratio_limit;
+        assert(violation_extent > 1.0);
+
+        if (violation_extent > report.violation_extent) {
+            report.worst_offending_completion = worst_offending_completion;
+            report.violation_extent = violation_extent;
+        }
     }
 
 
@@ -900,21 +937,23 @@ namespace Opm
             return;
         }
 
-        // checking for ratio related limits, mostly all kinds of ratio.
-        bool ratio_limits_violated = false;
-        RatioCheckTuple ratio_check_return;
 
-        if (econ_production_limits.onAnyRatioLimit()) {
-            ratio_check_return = checkRatioEconLimits(econ_production_limits, well_state, deferred_logger);
-            ratio_limits_violated = std::get<0>(ratio_check_return);
+        if ( !econ_production_limits.onAnyRatioLimit() ) {
+            // there is no need to check the ratio limits
+            return;
         }
 
-        if (ratio_limits_violated) {
+        // checking for ratio related limits, mostly all kinds of ratio.
+        RatioLimitCheckReport ratio_report;
+
+        checkRatioEconLimits(econ_production_limits, well_state, ratio_report, deferred_logger);
+
+        if (ratio_report.ratio_limit_violated) {
             const WellEcon::WorkoverEnum workover = econ_production_limits.workover();
             switch (workover) {
                 case WellEcon::CON:
                 {
-                    const int worst_offending_completion = std::get<1>(ratio_check_return);
+                    const int worst_offending_completion = ratio_report.worst_offending_completion;
 
                     well_test_state.addClosedCompletion(name(), worst_offending_completion, simulation_time);
                     if (write_message_to_opmlog) {

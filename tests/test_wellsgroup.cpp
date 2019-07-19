@@ -33,8 +33,8 @@
 #include <opm/core/wells/WellsGroup.hpp>
 
 #include <opm/parser/eclipse/Parser/Parser.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Group.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/GroupTree.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/Group/Group.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/Group/GroupTree.hpp>
 
 #include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/Well2.hpp>
@@ -95,9 +95,9 @@ BOOST_AUTO_TEST_CASE(ConstructGroupFromGroup) {
 
     const auto& nodes = sched.getGroupTree(2);
 
-    for( const auto& grp : sched.getGroups() ) {
-        if( !nodes.exists( grp->name() ) ) continue;
-        const auto& group = *grp;
+    for( const auto& grp_name : sched.groupNames() ) {
+        if( !nodes.exists( grp_name ) ) continue;
+        const auto& group = sched.getGroup(grp_name);
 
         std::shared_ptr<WellsGroupInterface> wellsGroup = createGroupWellsGroup(group, 2, pu);
         BOOST_CHECK_EQUAL(group.name(), wellsGroup->name());
@@ -131,10 +131,9 @@ BOOST_AUTO_TEST_CASE(EfficiencyFactor) {
 
 
     const auto& nodes = sched.getGroupTree(2);
-
-    for( const auto& grp : sched.getGroups() ) {
-        if( !nodes.exists( grp->name() ) ) continue;
-        const auto& group = *grp;
+    for( const auto& grp_name : sched.groupNames() ) {
+        if( !nodes.exists( grp_name ) ) continue;
+        const auto& group = sched.getGroup(grp_name);
 
         std::shared_ptr<WellsGroupInterface> wellsGroup = createGroupWellsGroup(group, 2, pu);
         BOOST_CHECK_EQUAL(group.name(), wellsGroup->name());
