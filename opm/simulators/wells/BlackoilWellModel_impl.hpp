@@ -359,7 +359,7 @@ namespace Opm {
             std::vector< Scalar > B_avg(numComponents(), Scalar() );
             computeAverageFormationFactor(B_avg);
 
-            const auto& wellsForTesting = wellTestState_.updateWell(wtest_config, simulationTime);
+            const auto& wellsForTesting = wellTestState_.updateWells(wtest_config, wells_ecl_, simulationTime);
             for (const auto& testWell : wellsForTesting) {
                 const std::string& well_name = testWell.first;
 
@@ -544,7 +544,7 @@ namespace Opm {
 
                 if (allow_closing_opening_wells) {
                     // A new WCON keywords can re-open a well that was closed/shut due to Physical limit
-                    if ( wellTestState_.hasWellClosed(well_name, WellTestConfig::Reason::PHYSICAL ) ) {
+                    if ( wellTestState_.hasWellClosed(well_name)) {
                         // TODO: more checking here, to make sure this standard more specific and complete
                         // maybe there is some WCON keywords will not open the well
                         if (well_state_.effectiveEventsOccurred(w)) {
@@ -555,7 +555,7 @@ namespace Opm {
                                 // even if it was new or received new targets this report step.
                                 well_state_.setEffectiveEventsOccurred(w, false);
                             } else {
-                                wellTestState_.openWell(well_name, WellTestConfig::Reason::PHYSICAL);
+                                wellTestState_.openWell(well_name);
                             }
                         }
                     }
@@ -1084,6 +1084,7 @@ namespace Opm {
 
         const Opm::SummaryConfig& summaryConfig = ebosSimulator_.vanguard().summaryConfig();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
+        const bool write_restart_file = ebosSimulator_.vanguard().eclState().getRestartConfig().getWriteRestartFile(reportStepIdx);
         int exception_thrown = 0;
         try {
             for (const auto& well : well_container_copy) {
@@ -1132,13 +1133,14 @@ namespace Opm {
 
 
 
-                const bool needed_for_output = ((summaryConfig.hasSummaryKey( "WWPI:" + well->name()) ||
-                                                 summaryConfig.hasSummaryKey( "WOPI:" + well->name()) ||
-                                                 summaryConfig.hasSummaryKey( "WGPI:" + well->name())) && well->wellType() == INJECTOR) ||
-                                               ((summaryConfig.hasSummaryKey( "WWPP:" + well->name()) ||
-                                                 summaryConfig.hasSummaryKey( "WOPP:" + well->name()) ||
-                                                 summaryConfig.hasSummaryKey( "WGPP:" + well->name())) && well->wellType() == PRODUCER);
-                if (needed_for_output || wellCollection().requireWellPotentials())
+                const bool needed_for_summary = ((summaryConfig.hasSummaryKey( "WWPI:" + well->name()) ||
+                                                  summaryConfig.hasSummaryKey( "WOPI:" + well->name()) ||
+                                                  summaryConfig.hasSummaryKey( "WGPI:" + well->name())) && well->wellType() == INJECTOR) ||
+                                                ((summaryConfig.hasSummaryKey( "WWPP:" + well->name()) ||
+                                                  summaryConfig.hasSummaryKey( "WOPP:" + well->name()) ||
+                                                  summaryConfig.hasSummaryKey( "WGPP:" + well->name())) && well->wellType() == PRODUCER);
+
+                if (write_restart_file || needed_for_summary || wellCollection().requireWellPotentials())
                 {
                     std::vector<double> potentials;
                     well->computeWellPotentials(ebosSimulator_, B_avg, well_state_copy, potentials, deferred_logger);

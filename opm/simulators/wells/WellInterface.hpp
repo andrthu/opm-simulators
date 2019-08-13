@@ -47,9 +47,6 @@
 #include <opm/simulators/timestepping/ConvergenceReport.hpp>
 #include <opm/simulators/utils/DeferredLogger.hpp>
 
-#include <ewoms/models/blackoil/blackoilpolymermodules.hh>
-#include <ewoms/models/blackoil/blackoilsolventmodules.hh>
-
 #include<dune/common/fmatrix.hh>
 #include<dune/istl/bcrsmatrix.hh>
 #include<dune/istl/matrixmatrix.hh>
@@ -97,19 +94,19 @@ namespace Opm
         typedef Dune::BlockVector<VectorBlockType> BVector;
         typedef DenseAd::Evaluation<double, /*size=*/numEq> Eval;
 
-        typedef Ewoms::BlackOilPolymerModule<TypeTag> PolymerModule;
-
         static const bool has_solvent = GET_PROP_VALUE(TypeTag, EnableSolvent);
         static const bool has_polymer = GET_PROP_VALUE(TypeTag, EnablePolymer);
         static const bool has_energy = GET_PROP_VALUE(TypeTag, EnableEnergy);
         // flag for polymer molecular weight related
         static const bool has_polymermw = GET_PROP_VALUE(TypeTag, EnablePolymerMW);
+        static const bool has_foam = GET_PROP_VALUE(TypeTag, EnableFoam);
         static const int contiSolventEqIdx = Indices::contiSolventEqIdx;
         static const int contiPolymerEqIdx = Indices::contiPolymerEqIdx;
         // index for the polymer molecular weight continuity equation
         static const int contiPolymerMWEqIdx = Indices::contiPolymerMWEqIdx;
+        static const int contiFoamEqIdx = Indices::contiFoamEqIdx;
 
-        // For the conversion between the surface volume rate and resrevoir voidage rate
+        // For the conversion between the surface volume rate and reservoir voidage rate
         using RateConverterType = RateConverter::
         SurfaceToReservoirVoidage<FluidSystem, std::vector<int> >;
 
@@ -366,6 +363,8 @@ namespace Opm
 
         double wpolymer() const;
 
+        double wfoam() const;
+
         bool checkRateEconLimits(const WellEconProductionLimits& econ_production_limits,
                                  const WellState& well_state,
                                  Opm::DeferredLogger& deferred_logger) const;
@@ -379,20 +378,21 @@ namespace Opm
 
         double mostStrictBhpFromBhpLimits(Opm::DeferredLogger& deferred_logger) const;
 
-        // a tuple type for ratio limit check.
-        // first value indicates whether ratio limit is violated, when the ratio limit is not violated, the following two
-        // values should not be used.
-        // second value indicates the index of the worst-offending completion.
-        // the last value indicates the extent of the violation for the worst-offending completion, which is defined by
-        // the ratio of the actual value to the value of the violated limit.
-        using RatioCheckTuple = std::tuple<bool, int, double>;
+        struct RatioLimitCheckReport;
 
-        RatioCheckTuple checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits,
-                                              const WellState& well_state) const;
+        void checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits,
+                              const WellState& well_state,
+                              RatioLimitCheckReport& report) const;
 
-        RatioCheckTuple checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits,
-                                             const WellState& well_state,
-                                             Opm::DeferredLogger& deferred_logger) const;
+        void checkMaxGORLimit(const WellEconProductionLimits& econ_production_limits,
+                              const WellState& well_state,
+                              RatioLimitCheckReport& report) const;
+
+        void checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits,
+                                  const WellState& well_state,
+                                  RatioLimitCheckReport& report,
+                                  Opm::DeferredLogger& deferred_logger) const;
+
 
         template <typename RatioFunc>
         bool checkMaxRatioLimitWell(const WellState& well_state,
@@ -403,8 +403,7 @@ namespace Opm
         void checkMaxRatioLimitCompletions(const WellState& well_state,
                                            const double max_ratio_limit,
                                            const RatioFunc& ratioFunc,
-                                           int& worst_offending_completion,
-                                           double& violation_extent) const;
+                                           RatioLimitCheckReport& report) const;
 
         double scalingFactor(const int comp_idx) const;
 
@@ -499,6 +498,17 @@ namespace Opm
         bool obey_bhp_limit_with_thp_limit = true;
 
     };
+
+
+    template<typename TypeTag>
+    struct
+    WellInterface<TypeTag>::
+    RatioLimitCheckReport{
+        bool ratio_limit_violated = false;
+        int worst_offending_completion = INVALIDCOMPLETION;
+        double violation_extent = 0.0;
+    };
+
     const std::string modestring[4] = { "BHP", "THP", "RESERVOIR_RATE", "SURFACE_RATE" };
 
 }
