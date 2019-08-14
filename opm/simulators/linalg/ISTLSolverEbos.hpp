@@ -384,9 +384,6 @@ protected:
             SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
 #endif
 
-            // Communicate if parallel.
-            parallelInformation_arg.copyOwnerToAll(istlb, istlb);
-
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
             {
@@ -646,13 +643,13 @@ protected:
         }
 
         /// Zero out off-diagonal blocks on rows corresponding to overlap cells
-        /// Diagonal blocks on ovelap rows are set to diag(1e100).
+        /// Diagonal blocks on ovelap rows are set to diag(1).
         void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
         {
             //value to set on diagonal
             Dune::FieldMatrix<Scalar, numEq, numEq> diag_block(0.0);
             for (int eq = 0; eq < numEq; ++eq)
-                diag_block[eq][eq] = 1.0e100;
+                diag_block[eq][eq] = 1.0;
 
             //loop over precalculated overlap rows and columns
             for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
