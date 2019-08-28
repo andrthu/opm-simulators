@@ -556,10 +556,10 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
             auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
 #else
-	    //typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
-	    typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
+	    typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
+	    //typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-            SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
+            SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
 #endif
 
             // Communicate if parallel.
