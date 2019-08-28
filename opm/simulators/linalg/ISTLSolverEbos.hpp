@@ -659,7 +659,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #if DUNE_VERSION_NEWER_REV(DUNE_ISTL, 2 , 5, 1)
         // 3x3 matrix block inversion was unstable from at least 2.3 until and
         // including 2.5.0
-        typedef ParallelOverlappingILU0<Matrix,Vector,Vector,Comm> ParPreconditioner;
+        typedef GhostLastParallelOverlappingILU0<Matrix,Vector,Vector,Comm> ParPreconditioner;
 #else
         typedef GhostLastParallelOverlappingILU0<Dune::BCRSMatrix<Dune::MatrixBlock<typename Matrix::field_type,
                                                                                     Matrix::block_type::rows,
