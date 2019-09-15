@@ -334,7 +334,7 @@ private:
     size_type interiorSize_;
 };
 
-template <class  X, class C, int c>
+template <class  X, class C, int c, bool o>
 struct GhostLastSPChooser
 {
     typedef C communication_type;
@@ -343,7 +343,7 @@ struct GhostLastSPChooser
 };
 
 template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential>
+struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential, true>
 {
     typedef Dune::SeqScalarProduct<X> ScalarProduct;
     enum { category = Dune::SolverCategory::sequential};
@@ -355,7 +355,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential>
 };
 
 template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
+struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, true>
 {
     typedef  GhostLastScalarProduct<X,C> ScalarProduct;
     typedef C communication_type;
@@ -365,6 +365,20 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
     static ScalarProduct* construct(const communication_type& comm, size_t is)
     {
 	return new ScalarProduct(comm, is);
+    }
+};
+
+template <class  X, class C>
+struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, false>
+{
+    typedef Dune::OverlappingSchwarzScalarProduct<X,C> ScalarProduct;
+    typedef C communication_type;
+
+    enum {category = Dune::SolverCategory::overlapping};
+
+    static ScalarProduct* construct(const communication_type& comm, size_t is)
+    {
+	return new ScalarProduct(comm);
     }
 };
 
@@ -420,10 +434,16 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 	    const auto gridHelp = simulator_.vanguard().grid();
 	    
 	    interiorSize_ = detail::numInteriorCells(gridHelp);
-	    
+	    ghostLastOrder_ = true;
 	    int reorderGhostMethod = simulator_.vanguard().reorderLocalMethod();
-	    if (reorderGhostMethod == 0 || reorderGhostMethod == 6)
+	    if (reorderGhostMethod == 0 || reorderGhostMethod == 6) {
+		detail::findOverlapRowsAndColumns(gridHelp, overlapRowAndColumns_);
 		interiorSize_ = gridHelp.numCells();
+		ghostLastOrder_ = false;
+	    }
+	    else {
+		overlapRowAndColumns_.resize(1);
+	    }
         }
 
         // nothing to clean here
@@ -503,12 +523,23 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 
             if( isParallel() )
             {
-		typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+		if ( ghostLastOrder_ ) {
+		    typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 		
-                Operator opA(*matrix_, *matrix_, wellModel, interiorSize_,
-                             parallelInformation_ );
-                assert( opA.comm() );
-                solve( opA, x, *rhs_, *(opA.comm()) );
+		    Operator opA(*matrix_, *matrix_, wellModel, interiorSize_,
+				 parallelInformation_ );
+		    assert( opA.comm() );
+		    solve( opA, x, *rhs_, *(opA.comm()) );
+		}
+		else {
+		    typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+
+		    makeOverlapRowsInvalid(*matrix_);
+		    Operator opA(*matrix_, *matrix_, wellModel,
+				 parallelInformation_ );
+		    assert( opA.comm() );
+		    solve( opA, x, *rhs_, *(opA.comm()) );
+		}
             }
             else
             {
@@ -556,10 +587,11 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 #if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
             auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
 #else
-	    typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
-	    //typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
+	    //typedef GhostLastSPChooser<Vector, POrComm, category, ghostLastOrder_> ScalarProductChooser;
+	    typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-            SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
+            //SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
+	    SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
 #endif
 
             // Communicate if parallel.
@@ -911,7 +943,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
                 }
             }
 	}
-
+	*/
         /// Zero out off-diagonal blocks on rows corresponding to overlap cells
         /// Diagonal blocks on ovelap rows are set to diag(1.0).
         void makeOverlapRowsInvalid(Matrix& ebosJacIgnoreOverlap) const
@@ -938,7 +970,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
                 }
             }
         }
-	*/
+	
         // Weights to make approximate pressure equations.
         // Calculated from the storage terms (only) of the
         // conservation equations, ignoring all other terms.
@@ -1139,9 +1171,10 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
         Vector *rhs_;
         std::unique_ptr<Matrix> matrix_for_preconditioner_;
 
-        //std::vector<std::pair<int,std::set<int>>> overlapRowAndColumns_;
+        std::vector<std::pair<int,std::vector<int>>> overlapRowAndColumns_;
 	//std::vector<std::pair<int,std::set<int>>> interiorRowAndColumns_;
 	size_t interiorSize_=0;
+	bool ghostLastOrder_;
 
         FlowLinearSolverParameters parameters_;
         Vector weights_;
