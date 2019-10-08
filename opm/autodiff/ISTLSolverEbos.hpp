@@ -334,7 +334,7 @@ private:
     size_type interiorSize_;
 };
 
-template <class  X, class C, int c, bool o>
+template <class  X, class C, int c>
 struct GhostLastSPChooser
 {
     typedef C communication_type;
@@ -343,7 +343,7 @@ struct GhostLastSPChooser
 };
 
 template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential, true>
+struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential>
 {
     typedef Dune::SeqScalarProduct<X> ScalarProduct;
     enum { category = Dune::SolverCategory::sequential};
@@ -355,7 +355,7 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::sequential, true>
 };
 
 template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, true>
+struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping>
 {
     typedef  GhostLastScalarProduct<X,C> ScalarProduct;
     typedef C communication_type;
@@ -365,20 +365,6 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, true>
     static ScalarProduct* construct(const communication_type& comm, size_t is)
     {
 	return new ScalarProduct(comm, is);
-    }
-};
-
-template <class  X, class C>
-struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, false>
-{
-    typedef Dune::OverlappingSchwarzScalarProduct<X,C> ScalarProduct;
-    typedef C communication_type;
-
-    enum {category = Dune::SolverCategory::overlapping};
-
-    static ScalarProduct* construct(const communication_type& comm, size_t is)
-    {
-	return new ScalarProduct(comm);
     }
 };
 
@@ -587,15 +573,13 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, false>
 #if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
             auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
 #else
-	    //typedef GhostLastSPChooser<Vector, POrComm, category, ghostLastOrder_> ScalarProductChooser;
-	    typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
+	    typedef GhostLastSPChooser<Vector, POrComm, category> ScalarProductChooser;
+	    //typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-            //SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
-	    SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
+            SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg, interiorSize_));
+	    
 #endif
 
-            // Communicate if parallel.
-	    //parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
@@ -680,12 +664,12 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, false>
 #if DUNE_VERSION_NEWER_REV(DUNE_ISTL, 2 , 5, 1)
         // 3x3 matrix block inversion was unstable from at least 2.3 until and
         // including 2.5.0
-        typedef ParallelOverlappingILU0<Matrix,Vector,Vector,Comm> ParPreconditioner;
+	typedef GhostLastParallelOverlappingILU0<Matrix,Vector,Vector,Comm> ParPreconditioner;
 #else
-        typedef ParallelOverlappingILU0<Dune::BCRSMatrix<Dune::MatrixBlock<typename Matrix::field_type,
-                                                                           Matrix::block_type::rows,
-                                                                           Matrix::block_type::cols> >,
-                                        Vector, Vector, Comm> ParPreconditioner;
+	typedef GhostLastParallelOverlappingILU0<Dune::BCRSMatrix<Dune::MatrixBlock<typename Matrix::field_type,
+										    Matrix::block_type::rows,
+                                                                                    Matrix::block_type::cols> >,
+                                                 Vector, Vector, Comm> ParPreconditioner;
 #endif
         template <class Operator>
         std::unique_ptr<ParPreconditioner>
@@ -696,8 +680,8 @@ struct GhostLastSPChooser<X,C,Dune::SolverCategory::overlapping, false>
             const MILU_VARIANT ilu_milu  = parameters_.ilu_milu_;
             const bool ilu_redblack = parameters_.ilu_redblack_;
             const bool ilu_reorder_spheres = parameters_.ilu_reorder_sphere_;
-            return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
-	    //return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
+	    return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorSize_, ilu_redblack, ilu_reorder_spheres));
+
         }
 #endif
 

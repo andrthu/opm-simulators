@@ -519,8 +519,7 @@ namespace Opm
           numLower += numLowerRow;
           numUpper += (*i).size() - numLowerRow - 1;
         }
-	//numLower += A.N() - interiorSize_;
-	//numUpper += A.N() - interiorSize_;
+
         assert(numLower + numUpper + A.N() == A.nonzeroes());
 
         lower.reserveAdditional( numLower );
@@ -804,8 +803,6 @@ public:
           comm_(nullptr), w_(w),
           relaxation_( std::abs( w - 1.0 ) > 1e-15 )
     {
-	useInteriorSize_ = false;
-	interiorSize_ = 0;
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
         init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
@@ -838,8 +835,6 @@ public:
     {
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
-        useInteriorSize_ = false;
-	interiorSize_ = 0;
 	init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
               reorder_sphere );
 	
@@ -863,7 +858,6 @@ public:
                              bool reorder_sphere=true)
         : ParallelOverlappingILU0( A, 0, w, milu, redblack, reorder_sphere )
     {
-	useInteriorSize_ = false;
     }
 
     /*! \brief Constructor.
@@ -892,30 +886,8 @@ public:
     {
         // BlockMatrix is a Subclass of FieldMatrix that just adds
         // methods. Therefore this cast should be safe.
-        useInteriorSize_ = false;
-	interiorSize_ = 0;
 	init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
               reorder_sphere );
-    }
-
-    template<class BlockType, class Alloc>
-    ParallelOverlappingILU0 (const Dune::BCRSMatrix<BlockType,Alloc>& A,
-                             const ParallelInfo& comm, const field_type w,
-                             MILU_VARIANT milu, size_t interiorSize,
-			     bool redblack=false,
-                             bool reorder_sphere=true)
-        : lower_(),
-          upper_(),
-          inv_(),
-          comm_(&comm), w_(w),
-          relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
-	  interiorSize_(interiorSize)
-    {
-        // BlockMatrix is a Subclass of FieldMatrix that just adds
-        // methods. Therefore this cast should be safe.
-        useInteriorSize_ = true;
-	init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
-              reorder_sphere, true, interiorSize);
     }
 
     /*!
@@ -934,65 +906,6 @@ public:
 
       \copydoc Preconditioner::apply(X&,const Y&)
     */
-    /*
-    virtual void apply (Domain& v, const Range& d)
-    {
-        Range& md = reorderD(d);
-        Domain& mv = reorderV(v);
-
-        // iterator types
-        typedef typename Range ::block_type  dblock;
-        typedef typename Domain::block_type  vblock;
-
-        //const size_type iEnd = lower_.rows();
-        //const size_type lastRow = iEnd - 1;
-	size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
-	size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
-	//const size_type lastInteriorRow = interiorSize_ - 1;
-        if( iEnd != upper_.rows() )
-        {
-            OPM_THROW(std::logic_error,"ILU: number of lower and upper rows must be the same");
-        }
-
-        // lower triangular solve
-        for( size_type i = 0; i < iEnd; ++ i )
-        {
-          dblock rhs( md[ i ] );
-          const size_type rowI     = lower_.rows_[ i ];
-          const size_type rowINext = lower_.rows_[ i+1 ];
-
-          for( size_type col = rowI; col < rowINext; ++ col )
-          {
-              lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
-          }
-
-          mv[ i ] = rhs;  // Lii = I
-        }
-
-        for( size_type i = 0; i < iEnd; ++ i )
-        {
-	    vblock& vBlock = mv[ lastRow - i ];
-	    vblock rhs ( vBlock );
-	    const size_type rowI     = upper_.rows_[ i ];
-	    const size_type rowINext = upper_.rows_[ i+1 ];
-	    
-	    for( size_type col = rowI; col < rowINext; ++ col )
-	    {
-	        upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
-	    }
-	    
-	    // apply inverse and store result
-	    inv_[ i ].mv( rhs, vBlock);
-        }
-
-        copyOwnerToAll( mv );
-
-        if( relaxation_ ) {
-            mv *= w_;
-        }
-        reorderBack(mv, v);
-    }
-    */
     virtual void apply (Domain& v, const Range& d)
     {
         Range& md = reorderD(d);
@@ -1004,8 +917,7 @@ public:
 
         const size_type iEnd = lower_.rows();
         const size_type lastRow = iEnd - 1;
-	size_type interiorStart = useInteriorSize_ ? iEnd - interiorSize_ : 0;
-	size_type lowerLoopEnd = useInteriorSize_ ? interiorSize_ : iEnd;
+	
 	//const size_type lastInteriorRow = interiorSize_ - 1;
         if( iEnd != upper_.rows() )
         {
@@ -1013,7 +925,7 @@ public:
         }
 
         // lower triangular solve
-        for( size_type i = 0; i < lowerLoopEnd; ++ i )
+        for( size_type i = 0; i < iEnd; ++ i )
         {
           dblock rhs( md[ i ] );
           const size_type rowI     = lower_.rows_[ i ];
@@ -1027,7 +939,7 @@ public:
           mv[ i ] = rhs;  // Lii = I
         }
 
-        for( size_type i = interiorStart; i < iEnd; ++ i )
+        for( size_type i = 0; i < iEnd; ++ i )
         {
 	    vblock& vBlock = mv[ lastRow - i ];
 	    vblock rhs ( vBlock );
@@ -1044,7 +956,7 @@ public:
         }
 
         copyOwnerToAll( mv );
-	
+
         if( relaxation_ ) {
             mv *= w_;
         }
@@ -1070,8 +982,7 @@ public:
     }
 
 protected:
-    void init( const Matrix& A, const int iluIteration, MILU_VARIANT milu, bool redBlack, bool reorderSpheres, bool useInter=false,
-	       size_type interSize=0)
+    void init( const Matrix& A, const int iluIteration, MILU_VARIANT milu, bool redBlack, bool reorderSpheres)
     {
         // (For older DUNE versions the communicator might be
         // invalid if redistribution in AMG happened on the coarset level.
@@ -1172,14 +1083,9 @@ protected:
                                                   detail::IsPositiveFunctor() );
                     break;
                 default:
-		    if (useInter)
-		    {
-			detail::ghost_last_bilu0_decomposition(*ILU, interSize);
-		    }
-		    else
-		    {
-			bilu0_decomposition( *ILU );
-		    }
+		    
+		    bilu0_decomposition( *ILU );
+		    
                     break;
                 }
             }
@@ -1220,7 +1126,6 @@ protected:
 
         // store ILU in simple CRS format
         detail::convertToCRS( *ILU, lower_, upper_, inv_ );
-        //detail::convertToCRSGhostLast( *ILU, lower_, upper_, inv_, interiorSize_ );
     }
 
     /// \brief Reorder D if needed and return a reference to it.
@@ -1292,9 +1197,373 @@ protected:
     //! \brief The relaxation factor to use.
     const field_type w_;
     const bool relaxation_;
-    size_type interiorSize_;
-    bool useInteriorSize_;
 };
 
+/// \brief A two-step version of an overlapping Schwarz preconditioner using one step ILU0 as
+///
+/// This preconditioner differs from a ParallelRestrictedOverlappingSchwarz with
+/// Dune:SeqILU0 in the follwing way:
+/// During apply we make sure that the current residual is consistent (i.e.
+/// each process knows the same value for each index. The we solve
+/// Ly= d for y and make y consistent again. Last we solve Ux = y and
+/// make sure that x is consistent.
+/// In contrast for ParallelRestrictedOverlappingSchwarz we solve (LU)x = d for x
+/// without forcing consistency between the two steps.
+/// \tparam Matrix The type of the Matrix.
+/// \tparam Domain The type of the Vector representing the domain.
+/// \tparam Range The type of the Vector representing the range.
+/// \tparam ParallelInfo The type of the parallel information object
+///         used, e.g. Dune::OwnerOverlapCommunication
+template<class Matrix, class Domain, class Range, class ParallelInfoT>
+class GhostLastParallelOverlappingILU0
+    : public Dune::Preconditioner<Domain,Range>
+{
+    typedef ParallelInfoT ParallelInfo;
+
+
+public:
+    //! \brief The matrix type the preconditioner is for.
+    typedef typename std::remove_const<Matrix>::type matrix_type;
+    //! \brief The domain type of the preconditioner.
+    typedef Domain domain_type;
+    //! \brief The range type of the preconditioner.
+    typedef Range range_type;
+    //! \brief The field type of the preconditioner.
+    typedef typename Domain::field_type field_type;
+
+    typedef typename matrix_type::block_type  block_type;
+    typedef typename matrix_type::size_type   size_type;
+
+protected:
+    struct CRS
+    {
+      CRS() : nRows_( 0 ) {}
+
+      size_type rows() const { return nRows_; }
+
+      size_type nonZeros() const
+      {
+        assert( rows_[ rows() ] != size_type(-1) );
+        return rows_[ rows() ];
+      }
+
+      void resize( const size_type nRows )
+      {
+          if( nRows_ != nRows )
+          {
+            nRows_ = nRows ;
+            rows_.resize( nRows_+1, size_type(-1) );
+          }
+      }
+
+      void reserveAdditional( const size_type nonZeros )
+      {
+          const size_type needed = values_.size() + nonZeros ;
+          if( values_.capacity() < needed )
+          {
+              const size_type estimate = needed * 1.1;
+              values_.reserve( estimate );
+              cols_.reserve( estimate );
+          }
+      }
+
+      void push_back( const block_type& value, const size_type index )
+      {
+          values_.push_back( value );
+          cols_.push_back( index );
+      }
+
+      std::vector< size_type  > rows_;
+      std::vector< block_type > values_;
+      std::vector< size_type  > cols_;
+      size_type nRows_;
+    };
+
+public:
+#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
+    Dune::SolverCategory::Category category() const override
+    {
+      return std::is_same<ParallelInfoT, Dune::Amg::SequentialInformation>::value ?
+              Dune::SolverCategory::sequential : Dune::SolverCategory::overlapping;
+    }
+
+#else
+    // define the category
+    enum {
+        //! \brief The category the preconditioner is part of.
+        category = std::is_same<ParallelInfoT, Dune::Amg::SequentialInformation>::value ?
+            Dune::SolverCategory::sequential : Dune::SolverCategory::overlapping
+    };
+#endif
+
+    /*! \brief Constructor.
+
+      Constructor gets all parameters to operate the prec.
+      \param A The matrix to operate on.
+      \param n ILU fill in level (for testing). This does not work in parallel.
+      \param w The relaxation factor.
+      \param milu The modified ILU variant to use. 0 means traditional ILU. \see MILU_VARIANT.
+      \param redblack Whether to use a red-black ordering.
+      \param reorder_sphere If true, we start the reordering at a root node.
+                            The vertices on each layer aound it (same distance) are
+                            ordered consecutivly. If false, we preserver the order of
+                            the vertices with the same color.
+    */
+    template<class BlockType, class Alloc>
+    GhostLastParallelOverlappingILU0 (const Dune::BCRSMatrix<BlockType,Alloc>& A,
+                                      const int n, const field_type w,
+                                      MILU_VARIANT milu, unsigned interiorSize, bool redblack=false,
+                                      bool reorder_sphere=true)
+        : lower_(),
+          upper_(),
+          inv_(),
+          comm_(nullptr), w_(w),
+          relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
+          interiorSize_(interiorSize)
+    {
+        // BlockMatrix is a Subclass of FieldMatrix that just adds
+        // methods. Therefore this cast should be safe.
+        init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
+              reorder_sphere  );
+    }
+
+    /*! \brief Constructor gets all parameters to operate the prec.
+      \param A The matrix to operate on.
+      \param comm   communication object, e.g. Dune::OwnerOverlapCopyCommunication
+      \param n ILU fill in level (for testing). This does not work in parallel.
+      \param w The relaxation factor.
+      \param milu The modified ILU variant to use. 0 means traditional ILU. \see MILU_VARIANT.
+      \param redblack Whether to use a red-black ordering.
+      \param reorder_sphere If true, we start the reordering at a root node.
+                            The vertices on each layer aound it (same distance) are
+                            ordered consecutivly. If false, we preserver the order of
+                            the vertices with the same color.
+    */
+    template<class BlockType, class Alloc>
+    GhostLastParallelOverlappingILU0 (const Dune::BCRSMatrix<BlockType,Alloc>& A,
+                                      const ParallelInfo& comm, const int n, const field_type w,
+                                      MILU_VARIANT milu, unsigned interiorSize, bool redblack=false,
+                                      bool reorder_sphere=true)
+        : lower_(),
+          upper_(),
+          inv_(),
+          comm_(&comm), w_(w),
+          relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
+          interiorSize_(interiorSize)
+    {
+        // BlockMatrix is a Subclass of FieldMatrix that just adds
+        // methods. Therefore this cast should be safe.
+        init( reinterpret_cast<const Matrix&>(A), n, milu, redblack,
+              reorder_sphere );
+    }
+
+    /*! \brief Constructor.
+
+      Constructor gets all parameters to operate the prec.
+      \param A The matrix to operate on.
+      \param w The relaxation factor.
+      \param milu The modified ILU variant to use. 0 means traditional ILU. \see MILU_VARIANT.
+      \param redblack Whether to use a red-black ordering.
+      \param reorder_sphere If true, we start the reordering at a root node.
+                  The vertices on each layer aound it (same distance) are
+                  ordered consecutivly. If false, we preserver the order of
+                  the vertices with the same color.
+    */
+    template<class BlockType, class Alloc>
+    GhostLastParallelOverlappingILU0 (const Dune::BCRSMatrix<BlockType,Alloc>& A,
+                                      const field_type w, MILU_VARIANT milu, unsigned interiorSize,
+                                      bool redblack=false,
+                                      bool reorder_sphere=true)
+        : GhostLastParallelOverlappingILU0( A, 0, w, milu, interiorSize, redblack, reorder_sphere )
+    {
+    }
+
+    /*! \brief Constructor.
+
+      Constructor gets all parameters to operate the prec.
+      \param A      The matrix to operate on.
+      \param comm   communication object, e.g. Dune::OwnerOverlapCopyCommunication
+      \param w      The relaxation factor.
+      \param milu   The modified ILU variant to use. 0 means traditional ILU. \see MILU_VARIANT.
+      \param redblack Whether to use a red-black ordering.
+      \param reorder_sphere If true, we start the reordering at a root node.
+                            The vertices on each layer aound it (same distance) are
+                            ordered consecutivly. If false, we preserver the order of
+                            the vertices with the same color.
+    */
+    template<class BlockType, class Alloc>
+    GhostLastParallelOverlappingILU0 (const Dune::BCRSMatrix<BlockType,Alloc>& A,
+                                      const ParallelInfo& comm, const field_type w,
+                                      MILU_VARIANT milu, unsigned interiorSize,
+                                      bool redblack=false,
+                                      bool reorder_sphere=true)
+        : lower_(),
+          upper_(),
+          inv_(),
+          comm_(&comm), w_(w),
+          relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
+          interiorSize_(interiorSize)
+    {
+        // BlockMatrix is a Subclass of FieldMatrix that just adds
+        // methods. Therefore this cast should be safe.
+        init( reinterpret_cast<const Matrix&>(A), 0, milu, redblack,
+              reorder_sphere );
+    }
+
+    /*!
+      \brief Prepare the preconditioner.
+
+      \copydoc Preconditioner::pre(X&,Y&)
+    */
+    virtual void pre (Domain& x, Range& b) override
+    {
+        DUNE_UNUSED_PARAMETER(x);
+        DUNE_UNUSED_PARAMETER(b);
+    }
+
+    /*!
+      \brief Apply the preconditoner.
+
+      \copydoc Preconditioner::apply(X&,const Y&)
+    */
+    virtual void apply (Domain& v, const Range& d) override
+    {
+        Range& md = const_cast<Range&>(d);;
+
+        // iterator types
+        typedef typename Range ::block_type  dblock;
+        typedef typename Domain::block_type  vblock;
+
+        const size_type iEnd = lower_.rows();
+        const size_type lastRow = iEnd - 1;
+        size_type interiorStart = iEnd - interiorSize_;
+        size_type lowerLoopEnd = interiorSize_;
+        if( iEnd != upper_.rows() )
+        {
+            OPM_THROW(std::logic_error,"ILU: number of lower and upper rows must be the same");
+        }
+
+        // lower triangular solve
+        for( size_type i = 0; i < lowerLoopEnd; ++ i )
+        {
+          dblock rhs( md[ i ] );
+          const size_type rowI     = lower_.rows_[ i ];
+          const size_type rowINext = lower_.rows_[ i+1 ];
+
+          for( size_type col = rowI; col < rowINext; ++ col )
+          {
+            lower_.values_[ col ].mmv( v[ lower_.cols_[ col ] ], rhs );
+          }
+
+          v[ i ] = rhs;  // Lii = I
+        }
+
+        for( size_type i = interiorStart; i < iEnd; ++ i )
+        {
+            vblock& vBlock = v[ lastRow - i ];
+            vblock rhs ( vBlock );
+            const size_type rowI     = upper_.rows_[ i ];
+            const size_type rowINext = upper_.rows_[ i+1 ];
+
+            for( size_type col = rowI; col < rowINext; ++ col )
+            {
+                upper_.values_[ col ].mmv( v[ upper_.cols_[ col ] ], rhs );
+            }
+
+            // apply inverse and store result
+            inv_[ i ].mv( rhs, vBlock);
+        }
+
+        copyOwnerToAll( v );
+
+        if( relaxation_ ) {
+            v *= w_;
+        }
+    }
+
+    template <class V>
+    void copyOwnerToAll( V& v ) const
+    {
+        if( comm_ ) {
+            comm_->copyOwnerToAll(v, v);
+        }
+    }
+
+    /*!
+      \brief Clean up.
+
+      \copydoc Preconditioner::post(X&)
+    */
+    virtual void post (Range& x) override
+    {
+        DUNE_UNUSED_PARAMETER(x);
+    }
+
+protected:
+    void init( const Matrix& A, const int iluIteration, MILU_VARIANT milu, bool redBlack, bool reorderSpheres )
+    {
+        // (For older DUNE versions the communicator might be
+        // invalid if redistribution in AMG happened on the coarset level.
+        // Therefore we check for nonzero size
+        if ( comm_ && comm_->communicator().size()<=0 )
+        {
+            if ( A.N() > 0 )
+            {
+                OPM_THROW(std::logic_error, "Expected a matrix with zero rows for an invalid communicator.");
+            }
+            else
+            {
+                // simply set the communicator to null
+                comm_ = nullptr;
+            }
+        }
+
+        int ilu_setup_successful = 1;
+        std::string message;
+        const int rank = ( comm_ ) ? comm_->communicator().rank() : 0;
+
+        std::unique_ptr< Matrix > ILU;
+
+        try
+        {
+            ILU.reset( new Matrix( A ) );
+            detail::ghost_last_bilu0_decomposition(*ILU, interiorSize_);
+        }
+        catch (const Dune::MatrixBlockError& error)
+        {
+            message = error.what();
+            std::cerr<<"Exception occured on process " << rank << " during " <<
+                "setup of ILU0 preconditioner with message: " <<
+                message<<std::endl;
+            ilu_setup_successful = 0;
+        }
+
+        // Check whether there was a problem on some process
+        const bool parallel_failure = comm_ && comm_->communicator().min(ilu_setup_successful) == 0;
+        const bool local_failure = ilu_setup_successful == 0;
+        if ( local_failure || parallel_failure )
+        {
+            throw Dune::MatrixBlockError();
+        }
+
+        // store ILU in simple CRS format
+        detail::convertToCRS( *ILU, lower_, upper_, inv_ );
+    }
+    
+protected:
+    //! \brief The ILU0 decomposition of the matrix.
+    CRS lower_;
+    CRS upper_;
+    std::vector< block_type > inv_;
+
+    const ParallelInfo* comm_;
+    //! \brief The relaxation factor to use.
+    const field_type w_;
+    const bool relaxation_;
+    size_type interiorSize_;
+};
+
+    
 } // end namespace Opm
 #endif
+
