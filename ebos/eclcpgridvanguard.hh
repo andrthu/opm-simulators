@@ -357,6 +357,7 @@ protected:
      */
     void findCommunicationPattern_(std::vector<int>& comTab)
     {
+#if HAVE_MPI
         const auto& rid = grid_->getCellRemoteIndices();
         
         for (auto prc = rid.begin(); prc!=rid.end(); ++prc)
@@ -372,6 +373,7 @@ protected:
                 }
             }
         }
+#endif
     }
 
 
