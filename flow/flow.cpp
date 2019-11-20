@@ -267,7 +267,6 @@ int main(int argc, char** argv)
     // we always want to use the default locale, and thus spare us the trouble
     // with incorrect locale settings.
     Opm::resetLocale();
-
     // this is a work-around for a catch 22: we do not know what code path to use without
     // parsing the deck, but we don't know the deck without having access to the
     // parameters and this requires to know the type tag to be used. To solve this, we
@@ -276,7 +275,6 @@ int main(int argc, char** argv)
     // identical manner it does not matter.)
     typedef TTAG(FlowEarlyBird) PreTypeTag;
     typedef GET_PROP_TYPE(PreTypeTag, Problem) PreProblem;
-
     PreProblem::setBriefDescription("Flow, an advanced reservoir simulator for ECL-decks provided by the Open Porous Media project.");
     int status = Opm::FlowMainEbos<PreTypeTag>::setupParameters_(argc, argv);
     if (status != 0) {
@@ -288,7 +286,6 @@ int main(int argc, char** argv)
 #endif
         return (status >= 0)?status:0;
     }
-
     FileOutputMode outputMode = FileOutputMode::OUTPUT_NONE;
     bool outputCout = false;
     if (mpiRank == 0)
@@ -310,10 +307,12 @@ int main(int argc, char** argv)
 
     if (outputCout) {
         Opm::FlowMainEbos<PreTypeTag>::printBanner();
+	std::cout << "heiH ";
     }
 
     // Create Deck and EclipseState.
     try {
+	
         if (outputCout) {
             std::cout << "Reading deck file '" << deckFilename << "'\n";
             std::cout.flush();
@@ -339,19 +338,16 @@ int main(int argc, char** argv)
                 parseContext.update( Opm::InputError::DELAYED_EXIT1);
 
             Opm::FlowMainEbos<PreTypeTag>::printPRTHeader(outputCout);
-
             deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
             Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
             if ( outputCout )
                 Opm::checkDeck(*deck, parser, parseContext, errorGuard);
-
             eclipseState.reset( new Opm::EclipseState(*deck, parseContext, errorGuard ));
             schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
             summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
             if (mpiRank == 0) {
                 setupMessageLimiter(schedule->getMessageLimits(), "STDOUT_LOGGER");
             }
-
             Opm::checkConsistentArrayDimensions(*eclipseState, *schedule, parseContext, errorGuard);
 
             if (errorGuard) {
@@ -361,6 +357,7 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Unrecoverable errors were encountered while loading input.");
             }
         }
+	std::cout << "hei5 ";
         const auto& phases = Opm::Runspec(*deck).phases();
         bool outputFiles = (outputMode != FileOutputMode::OUTPUT_NONE);
         // run the actual simulator

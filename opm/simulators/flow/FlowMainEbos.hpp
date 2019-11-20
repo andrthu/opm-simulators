@@ -247,11 +247,9 @@ namespace Opm
         {
             try {
                 // deal with some administrative boilerplate
-
                 int status = setupParameters_(argc, argv);
                 if (status)
                     return status;
-
                 setupParallelism();
                 setupEbosSimulator(output_cout);
                 runDiagnostics(output_cout);
