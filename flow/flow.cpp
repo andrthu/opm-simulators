@@ -307,10 +307,12 @@ int main(int argc, char** argv)
 
     if (outputCout) {
         Opm::FlowMainEbos<PreTypeTag>::printBanner();
+	std::cout << "heiH ";
     }
 
     // Create Deck and EclipseState.
     try {
+	
         if (outputCout) {
             std::cout << "Reading deck file '" << deckFilename << "'\n";
             std::cout.flush();
@@ -355,6 +357,7 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Unrecoverable errors were encountered while loading input.");
             }
         }
+	std::cout << "hei5 ";
         const auto& phases = Opm::Runspec(*deck).phases();
         bool outputFiles = (outputMode != FileOutputMode::OUTPUT_NONE);
         // run the actual simulator
