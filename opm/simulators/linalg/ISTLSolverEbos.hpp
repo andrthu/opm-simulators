@@ -331,12 +331,6 @@ protected:
             {
                 typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
 
-                //auto ebosJacIgnoreOverlap = Matrix(*matrix_);
-                //remove ghost rows in local matrix
-                //makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
-                //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
-                //to be certain that correct matrix is used for preconditioning.
-                //Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel,
                 copyJacToNoGhost(*matrix_, *noGhostMat_);
                 Operator opA(*noGhostMat_, *noGhostMat_, wellModel,
                              parallelInformation_ );
@@ -393,9 +387,6 @@ protected:
             typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
             SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
 #endif
-
-            // Communicate if parallel.
-            parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 
 #if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
@@ -734,7 +725,7 @@ protected:
             noGhostMat_->endindices();
         }
 
-        /// Set the ghost diagonal to diag(1.0)
+        /// Set the ghost diagonal in noGhost to diag(1.0)
         void setGhostsInNoGhost(Matrix& ng)
         {
             ng=0;
