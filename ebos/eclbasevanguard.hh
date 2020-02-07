@@ -77,6 +77,7 @@ NEW_PROP_TAG(EclOutputInterval);
 NEW_PROP_TAG(IgnoreKeywords);
 NEW_PROP_TAG(EnableExperiments);
 NEW_PROP_TAG(EdgeWeightsMethod);
+NEW_PROP_TAG(NumJacobiBlocks);
 
 SET_STRING_PROP(EclBaseVanguard, IgnoreKeywords, "");
 SET_STRING_PROP(EclBaseVanguard, EclDeckFileName, "");
@@ -84,7 +85,7 @@ SET_INT_PROP(EclBaseVanguard, EclOutputInterval, -1); // use the deck-provided v
 SET_BOOL_PROP(EclBaseVanguard, EnableOpmRstFile, false);
 SET_BOOL_PROP(EclBaseVanguard, EclStrictParsing, false);
 SET_INT_PROP(EclBaseVanguard, EdgeWeightsMethod, 1);
-
+SET_INT_PROP(EclBaseVanguard, NumJacobiBlocks, 0);
 END_PROPERTIES
 
 namespace Opm {
@@ -129,6 +130,8 @@ public:
                              "Use strict mode for parsing - all errors are collected before the applicaton exists.");
         EWOMS_REGISTER_PARAM(TypeTag, int, EdgeWeightsMethod,
                              "Choose edge-weighing strategy: 0=uniform, 1=trans, 2=log(trans).");
+        EWOMS_REGISTER_PARAM(TypeTag, int, NumJacobiBlocks,
+                             "Number of blocks to be created for the Block-Jacobi preconditioner.");
     }
 
     /*!
@@ -261,6 +264,7 @@ public:
 
         std::string fileName = EWOMS_GET_PARAM(TypeTag, std::string, EclDeckFileName);
         edgeWeightsMethod_   = Dune::EdgeWeightMethod(EWOMS_GET_PARAM(TypeTag, int, EdgeWeightsMethod));
+        numJacobiBlocks_ = EWOMS_GET_PARAM(TypeTag, int, NumJacobiBlocks);
 
         // Skip processing of filename if external deck already exists.
         if (!externalDeck_)
@@ -449,6 +453,12 @@ public:
      */
     Dune::EdgeWeightMethod edgeWeightsMethod() const
     { return edgeWeightsMethod_; }
+
+    /*!
+     * \brief Number of blocks in the Block-Jacobi preconditioner.
+     */
+    int numJacobiBlocks() const
+    {return numJacobiBlocks_;}
     /*!
      * \brief Returns the name of the case.
      *
@@ -608,6 +618,7 @@ private:
     Opm::SummaryConfig* eclSummaryConfig_;
 
     Dune::EdgeWeightMethod edgeWeightsMethod_;
+    int numJacobiBlocks_;
 };
 
 template <class TypeTag>

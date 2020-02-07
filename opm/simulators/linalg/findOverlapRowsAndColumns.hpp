@@ -39,9 +39,10 @@ namespace detail
     /// \param useWellConn Boolean that is true when UseWellContribusion is true
     /// \param wellGraph Cell IDs of well cells stored in a graph.
     template<class Grid, class W>
-    void setWellConnections(const Grid& grid, const W& wells, bool useWellConn, std::vector<std::set<int>>& wellGraph)
+    void setWellConnections(const Grid& grid, const W& wells, bool useWellConn, std::vector<std::set<int>>& wellGraph,
+			    int numPart)
     {
-        if ( grid.comm().size() > 1)
+        if ( grid.comm().size() > 1  || numPart > 1 )
         {
             Dune::CartesianIndexMapper< Grid > cartMapper( grid );
             const int numCells = cartMapper.compressedSize(); // grid.numCells()

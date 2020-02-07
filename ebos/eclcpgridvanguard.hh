@@ -131,6 +131,11 @@ public:
         equilCartesianIndexMapper_.reset();
     }
 
+    std::vector<int> cellPartition() const
+    {
+        return cell_part_;
+    }
+
     /*!
      * \brief Distribute the simulation grid over multiple processes
      *
@@ -141,8 +146,9 @@ public:
 #if HAVE_MPI
         int mpiSize = 1;
         MPI_Comm_size(MPI_COMM_WORLD, &mpiSize);
+        int numJacobiBlocks = this->numJacobiBlocks();
 
-        if (mpiSize > 1) {
+        if (mpiSize > 1 || numJacobiBlocks > 0) {
             // the CpGrid's loadBalance() method likes to have the transmissibilities as
             // its edge weights. since this is (kind of) a layering violation and
             // transmissibilities are relatively expensive to compute, we only do it if
@@ -187,24 +193,30 @@ public:
                     faceTrans[faceIdx] = globalTrans_->transmissibility(I, J);
                 }
             }
-
+            if (mpiSize > 1) {
             //distribute the grid and switch to the distributed view.
-            {
-                const auto wells = this->schedule().getWellsatEnd();
-                defunctWellNames_ = std::get<1>(grid_->loadBalance(edgeWeightsMethod, &wells, faceTrans.data()));
+                {
+                    const auto wells = this->schedule().getWellsatEnd();
+                    defunctWellNames_ = std::get<1>(grid_->loadBalance(edgeWeightsMethod, &wells, faceTrans.data()));
+                }
+                grid_->switchToDistributedView();
+
+                cartesianIndexMapper_.reset();
+
+                if ( ! equilGrid_ )
+                {
+                    // for processes that do not hold the global grid we filter here using the local grid.
+                    // If we would filter in filterConnection_ our partition would be empty and the connections of all
+                    // wells would be removed.
+                    ActiveGridCells activeCells(grid().logicalCartesianSize(),
+                                                grid().globalCell().data(), grid().size(0));
+                    this->schedule().filterConnections(activeCells);
+                }
             }
-            grid_->switchToDistributedView();
-
-            cartesianIndexMapper_.reset();
-
-            if ( ! equilGrid_ )
-            {
-                // for processes that do not hold the global grid we filter here using the local grid.
-                // If we would filter in filterConnection_ our partition would be empty and the connections of all
-                // wells would be removed.
-                ActiveGridCells activeCells(grid().logicalCartesianSize(),
-                                            grid().globalCell().data(), grid().size(0));
-                this->schedule().filterConnections(activeCells);
+            if (numJacobiBlocks > 0 && mpiSize == 1) {
+                const auto wells = this->schedule().getWellsatEnd();
+                cell_part_.resize(grid_->numCells());
+                cell_part_ = grid_->zoltanPartitionWithoutScatter(&wells, faceTrans.data(), numJacobiBlocks);
             }
         }
 #endif
@@ -212,6 +224,7 @@ public:
         cartesianIndexMapper_.reset(new CartesianIndexMapper(*grid_));
 
         this->updateGridView_();
+        
     }
 
     /*!
@@ -309,6 +322,7 @@ protected:
     std::unique_ptr<EclTransmissibility<TypeTag> > globalTrans_;
     std::unordered_set<std::string> defunctWellNames_;
     int mpiRank;
+    std::vector<int> cell_part_;
 };
 
 } // namespace Opm
