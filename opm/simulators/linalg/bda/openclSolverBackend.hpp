@@ -66,10 +66,13 @@ private:
 
     std::vector<cl::Device> devices;
 
+    int jac_nnz;
+    int jac_nnzb;
     Preconditioner *prec = nullptr;                               // only supported preconditioner is BILU0
     int *toOrder = nullptr, *fromOrder = nullptr;                 // BILU0 reorders rows of the matrix via these mappings
     bool analysis_done = false;
-    std::unique_ptr<BlockedMatrix<block_size> > mat = nullptr;    // original matrix 
+    std::unique_ptr<BlockedMatrix<block_size> > mat = nullptr;    // original matrix
+    std::unique_ptr<BlockedMatrix<block_size> > jacMat = nullptr;    // original matrix 
     BlockedMatrix<block_size> *rmat = nullptr;                    // reordered matrix (or original if no reordering), used for spmv
     ILUReorder opencl_ilu_reorder;                                // reordering strategy
     std::vector<cl::Event> events;
@@ -139,6 +142,9 @@ private:
     /// \param[in] cols           array of columnIndices, contains nnz values
     void initialize(int N, int nnz, int dim, double *vals, int *rows, int *cols);
 
+    void initialize2(int N, int nnz, int dim, double *vals, int *rows, int *cols,
+		     int nnz2, double *vals2, int *rows2, int *cols2);
+
     /// Clean memory
     void finalize();
 
@@ -204,6 +210,10 @@ public:
     /// \param[inout] x          resulting x vector, caller must guarantee that x points to a valid array
     void get_result(double *x) override;
 
+    SolverStatus solve_system2(int N_, int nnz_, int dim, double *vals, int *rows, int *cols, double *b,
+			       int nnz2, double *vals2, int *rows2, int *cols2,
+			       WellContributions& wellContribs, BdaResult &res) override;
+    
 }; // end class openclSolverBackend
 
 } // namespace Accelerator

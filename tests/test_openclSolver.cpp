@@ -88,7 +88,8 @@ testOpenclSolver(const boost::property_tree::ptree& prm, const std::string& matr
         BOOST_WARN_MESSAGE(true, error.what());
         throw PlatformInitException(error.what());
     }
-    bridge->solve_system(&matrix, rhs, *wellContribs, result);
+    //bridge->solve_system(&matrix, rhs, *wellContribs, result);
+    bridge->solve_system(&matrix, &matrix, 0, rhs, *wellContribs, result);
     bridge->get_result(x);
 
     return x;
