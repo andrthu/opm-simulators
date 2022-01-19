@@ -26,11 +26,11 @@
 #include <opm/core/props/BlackoilPhases.hpp>
 #include <opm/models/utils/propertysystem.hh>
 #include <opm/models/utils/parametersystem.hh>
-#include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Well/Well.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Group/Group.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/GasLiftOpt.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/SummaryState.hpp>
+#include <opm/input/eclipse/Schedule/Schedule.hpp>
+#include <opm/input/eclipse/Schedule/Well/Well.hpp>
+#include <opm/input/eclipse/Schedule/Group/Group.hpp>
+#include <opm/input/eclipse/Schedule/GasLiftOpt.hpp>
+#include <opm/input/eclipse/Schedule/SummaryState.hpp>
 #include <opm/simulators/wells/WellState.hpp>
 #include <opm/simulators/utils/DeferredLogger.hpp>
 
@@ -67,6 +67,8 @@ class GasLiftGroupInfo
     static const int Oil = BlackoilPhases::Liquid;
     static const int Gas = BlackoilPhases::Vapour;
 public:
+    enum class Rate {oil, gas, water, liquid};
+
     using GLiftEclWells = std::map<std::string,std::pair<const Well *,int>>;
     GasLiftGroupInfo(
         GLiftEclWells& ecl_wells,
@@ -82,19 +84,23 @@ public:
         const std::string& well_name);
 
     double alqRate(const std::string& group_name);
-    double gasRate(const std::string& group_name);
+    double gasRate(const std::string& group_name) const;
     int getGroupIdx(const std::string& group_name);
-    std::tuple<double,double,double,double> getRates(int group_idx);
-    std::optional<double> gasTarget(const std::string& group_name);
-    const std::string& groupIdxToName(int group_idx);
+    double getRate(Rate rate_type, const std::string& group_name) const;
+    std::tuple<double,double,double,double> getRates(const int group_idx) const;
+    std::optional<double> gasTarget(const std::string& group_name) const;
+    std::optional<double> getTarget(
+        Rate rate_type, const std::string& group_name) const;
+    const std::string& groupIdxToName(int group_idx) const;
     bool hasWell(const std::string& well_name);
     void initialize();
+    std::optional<double> liquidTarget(const std::string& group_name) const;
     std::optional<double> maxAlq(const std::string& group_name);
-    double oilRate(const std::string& group_name);
-    double waterRate(const std::string& group_name);
-    std::optional<double> oilTarget(const std::string& group_name);
-    std::optional<double> waterTarget(const std::string& group_name);
-    std::optional<double> liquidTarget(const std::string& group_name);
+    double oilRate(const std::string& group_name) const;
+    std::optional<double> oilTarget(const std::string& group_name) const;
+    static const std::string rateToString(Rate rate);
+    double waterRate(const std::string& group_name) const;
+    std::optional<double> waterTarget(const std::string& group_name) const;
     void update(const std::string& well_name,
         double delta_oil, double delta_gas, double delta_water, double delta_alq);
     void updateRate(int idx, double oil_rate, double gas_rate, double water_rate, double alq);

@@ -32,8 +32,8 @@
 
 #include <opm/output/data/Wells.hpp>
 #include <opm/output/eclipse/Inplace.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/SummaryState.hpp>
-#include <opm/parser/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
+#include <opm/input/eclipse/Schedule/SummaryState.hpp>
+#include <opm/input/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
 
 #include <dune/common/version.hh>
 #if DUNE_VERSION_NEWER(DUNE_COMMON, 2, 7)
@@ -128,6 +128,22 @@ public:
         return 0;
     }
 
+    Scalar getSaltSaturation(unsigned elemIdx) const
+    {
+        if (pSalt_.size() > elemIdx)
+            return pSalt_[elemIdx];
+
+        return 0;
+    }
+
+    Scalar getPermFactor(unsigned elemIdx) const
+    {
+        if (permFact_.size() > elemIdx)
+            return permFact_[elemIdx];
+
+        return 0;
+    }
+
     Scalar getMicrobialConcentration(unsigned elemIdx) const
     {
         if (cMicrobes_.size() > elemIdx)
@@ -204,6 +220,7 @@ protected:
                                    bool enablePolymer,
                                    bool enableFoam,
                                    bool enableBrine,
+                                   bool enableSaltPrecipitation,
                                    bool enableExtbo,
                                    bool enableMICP);
 
@@ -360,6 +377,7 @@ protected:
     bool enablePolymer_;
     bool enableFoam_;
     bool enableBrine_;
+    bool enableSaltPrecipitation_;
     bool enableExtbo_;
     bool enableMICP_;
 
@@ -393,6 +411,8 @@ protected:
     ScalarBuffer cPolymer_;
     ScalarBuffer cFoam_;
     ScalarBuffer cSalt_;
+    ScalarBuffer pSalt_;
+    ScalarBuffer permFact_;
     ScalarBuffer extboX_;
     ScalarBuffer extboY_;
     ScalarBuffer extboZ_;

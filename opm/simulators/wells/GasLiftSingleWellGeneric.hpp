@@ -25,8 +25,8 @@
 
 #include <opm/core/props/BlackoilPhases.hpp>
 
-#include <opm/parser/eclipse/EclipseState/Schedule/GasLiftOpt.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Well/Well.hpp>
+#include <opm/input/eclipse/Schedule/GasLiftOpt.hpp>
+#include <opm/input/eclipse/Schedule/Well/Well.hpp>
 #include <opm/simulators/wells/GasLiftGroupInfo.hpp>
 
 #include <functional>
@@ -57,6 +57,7 @@ protected:
 
 public:
     using GLiftSyncGroups = std::set<int>;
+    using Rate = GasLiftGroupInfo::Rate;
     struct GradInfo
     {
         GradInfo() { }
@@ -126,9 +127,6 @@ protected:
         bool checkAlqOutsideLimits(double alq, double oil_rate);
         bool checkEcoGradient(double gradient);
         bool checkGroupALQrateExceeded(double delta_alq);
-        bool checkGroupTargetsViolated(double delta_oil, double delta_gas, double delta_water);
-        std::tuple<double,double,double,double>
-          reduceALQtoGroupTarget(double alq, double oil_rate, double gas_rate, double water_rate, std::vector<double> &potentials);
         bool checkNegativeOilRate(double oil_rate);
         bool checkThpControl();
         bool checkOilRateExceedsTarget(double oil_rate);
@@ -148,6 +146,8 @@ protected:
                             double gas_rate, double new_gas_rate, bool increase) const;
 
     bool checkALQequal_(double alq1, double alq2) const;
+    bool checkGroupTargetsViolated(
+        double delta_oil, double delta_gas, double delta_water) const;
     bool checkInitialALQmodified_(double alq, double initial_alq) const;
 
     bool checkWellRatesViolated_(std::vector<double>& potentials,
@@ -178,17 +178,30 @@ protected:
     void displayWarning_(const std::string& warning);
 
     std::pair<double, bool> getBhpWithLimit_(double bhp) const;
-    std::pair<double, bool> getGasRateWithLimit_(const std::vector<double>& potentials) const;
-    std::tuple<double,double,double,bool,bool,bool>
-    getInitialRatesWithLimit_(const std::vector<double>& potentials);
-    std::pair<double, bool> getOilRateWithLimit_(const std::vector<double>& potentials) const;
-    std::pair<double, bool> getWaterRateWithLimit_(const std::vector<double>& potentials) const;
-
-    std::pair<double, bool> getOilRateWithGroupLimit_(const double new_oil_rate, const double oil_rate) const;
-    std::pair<double, bool> getGasRateWithGroupLimit_(const double new_gas_rate, const double gas_rate) const;
-    std::pair<double, bool> getWaterRateWithGroupLimit_(const double new_water_rate, const double water_rate) const;
-    std::tuple<double,double,bool,bool> getLiquidRateWithGroupLimit_(double new_oil_rate, const double oil_rate,
-                                                                     double new_water_rate, const double water_rate) const;
+    std::pair<double, bool> getGasRateWithLimit_(
+                           const std::vector<double>& potentials) const;
+    std::pair<double, bool> getGasRateWithGroupLimit_(
+                           double new_gas_rate, double gas_rate) const;
+    std::tuple<double,double,double,bool,bool,bool> getInitialRatesWithLimit_(
+                           const std::vector<double>& potentials);
+    std::tuple<double,double,bool,bool> getLiquidRateWithGroupLimit_(
+                           const double new_oil_rate, const double oil_rate,
+                           const double new_water_rate, const double water_rate) const;
+    std::pair<double, bool> getOilRateWithGroupLimit_(
+                           double new_oil_rate, double oil_rate) const;
+    std::pair<double, bool> getOilRateWithLimit_(
+                           const std::vector<double>& potentials) const;
+    double getProductionTarget_(Rate rate) const;
+    double getRate_(Rate rate_type, const std::vector<double>& potentials) const;
+    std::pair<double, bool> getRateWithLimit_(
+                           Rate rate_type, const std::vector<double>& potentials) const;
+    std::tuple<double, const std::string*, double> getRateWithGroupLimit_(
+                 Rate rate_type, const double new_rate, const double old_rate) const;
+    std::pair<double, bool> getWaterRateWithGroupLimit_(
+                           double new_water_rate, double water_rate) const;
+    std::pair<double, bool> getWaterRateWithLimit_(
+                           const std::vector<double>& potentials) const;
+    bool hasProductionControl_(Rate rate) const;
 
     std::tuple<double,double,bool,bool,double>
     increaseALQtoPositiveOilRate_(double alq,
@@ -212,9 +225,14 @@ protected:
       maybeAdjustALQbeforeOptimizeLoop_(
           bool increase, double alq, double oil_rate, double gas_rate, double water_rate,
           bool oil_is_limited, bool gas_is_limited, bool water_is_limited, std::vector<double> &potentials);
+    std::tuple<double,double,double,double>
+      reduceALQtoGroupTarget(double alq, double oil_rate, double gas_rate,
+                             double water_rate, std::vector<double> &potentials) const;
     std::tuple<double,double,double, bool, bool,bool,double>
-      reduceALQtoWellTarget_(double alq, double oil_rate, double gas_rate, double water_rate,
-          bool oil_is_limited, bool gas_is_limited, bool water_is_limited, std::vector<double> &potentials);
+      reduceALQtoWellTarget_(double alq, double oil_rate, double gas_rate,
+                             double water_rate, bool oil_is_limited,
+                             bool gas_is_limited, bool water_is_limited,
+                             std::vector<double> &potentials);
 
     std::unique_ptr<GasLiftWellState> runOptimize1_();
     std::unique_ptr<GasLiftWellState> runOptimize2_();

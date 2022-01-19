@@ -26,11 +26,11 @@
 
 #include <opm/material/fluidsystems/BlackOilFluidSystem.hpp>
 
-#include <opm/parser/eclipse/Deck/Deck.hpp>
-#include <opm/parser/eclipse/EclipseState/EclipseState.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
-#include <opm/parser/eclipse/EclipseState/Tables/OverburdTable.hpp>
-#include <opm/parser/eclipse/EclipseState/Tables/RockwnodTable.hpp>
+#include <opm/input/eclipse/Deck/Deck.hpp>
+#include <opm/input/eclipse/EclipseState/EclipseState.hpp>
+#include <opm/input/eclipse/Schedule/Schedule.hpp>
+#include <opm/input/eclipse/EclipseState/Tables/OverburdTable.hpp>
+#include <opm/input/eclipse/EclipseState/Tables/RockwnodTable.hpp>
 
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/polyhedralgrid.hh>
@@ -347,8 +347,9 @@ beginEpisode_(bool enableExperiments,
     // react to TUNING changes
     if (episodeIdx > 0 && enableTuning_ && events.hasEvent(ScheduleEvents::TUNING_CHANGE))
     {
-        const auto& tuning = schedule_[episodeIdx].tuning();
-        initialTimeStepSize_ = tuning.TSINIT;
+        const auto& sched_state = schedule_[episodeIdx];
+        const auto& tuning = sched_state.tuning();
+        initialTimeStepSize_ = sched_state.max_next_tstep();
         maxTimeStepAfterWellEvent_ = tuning.TMAXWC;
         maxTimeStepSize_ = tuning.TSMAXZ;
         restartShrinkFactor_ = 1./tuning.TSFCNV;

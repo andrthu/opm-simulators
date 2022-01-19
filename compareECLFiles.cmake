@@ -196,6 +196,48 @@ function(add_test_compare_parallel_restarted_simulation)
                        PROPERTIES RUN_SERIAL 1)
 endfunction()
 
+
+###########################################################################
+# TEST: add_test_split_comm
+###########################################################################
+
+# Input:
+#   - casename: basename (no extension)
+#
+# Details:
+#   - This test class compares the output from a parallel simulation
+#     to that of a parallel simulation running with a custom communicator.
+function(add_test_split_comm)
+  set(oneValueArgs CASENAME FILENAME SIMULATOR ABS_TOL REL_TOL DIR)
+  set(multiValueArgs TEST_ARGS)
+  cmake_parse_arguments(PARAM "$" "${oneValueArgs}" "${multiValueArgs}" ${ARGN} )
+  if(NOT PARAM_DIR)
+    set(PARAM_DIR ${PARAM_CASENAME})
+  endif()
+  set(RESULT_PATH ${BASE_RESULT_PATH}/parallelSplitComm/${PARAM_SIMULATOR}+${PARAM_CASENAME})
+  set(DRIVER_ARGS -i ${OPM_TESTS_ROOT}/${PARAM_DIR}
+                  -r ${RESULT_PATH}
+                  -b ${PROJECT_BINARY_DIR}/bin
+                  -f ${PARAM_FILENAME}
+                  -a ${PARAM_ABS_TOL}
+                  -t ${PARAM_REL_TOL}
+                  -c ${COMPARE_ECL_COMMAND})
+  if(PARAM_MPI_PROCS)
+    list(APPEND DRIVER_ARGS -n ${PARAM_MPI_PROCS})
+  endif()
+
+  opm_add_test(compareParallelSplitComm_${PARAM_SIMULATOR}+${PARAM_FILENAME} NO_COMPILE
+               EXE_NAME ${PARAM_SIMULATOR}
+               DRIVER_ARGS ${DRIVER_ARGS}
+               TEST_ARGS ${PARAM_TEST_ARGS})
+  set_tests_properties(compareParallelSplitComm_${PARAM_SIMULATOR}+${PARAM_FILENAME}
+                       PROPERTIES RUN_SERIAL 1)
+endfunction()
+
+
+###########################################################################
+
+
 if(NOT TARGET test-suite)
   add_custom_target(test-suite)
 endif()
@@ -295,6 +337,13 @@ add_test_compareECLFiles(CASENAME spe1_rockcomp
 
 add_test_compareECLFiles(CASENAME spe1_brine
                          FILENAME SPE1CASE1_BRINE
+                         SIMULATOR flow
+                         ABS_TOL ${abs_tol}
+                         REL_TOL ${rel_tol}
+                         DIR spe1_brine)
+
+add_test_compareECLFiles(CASENAME spe1_brine_gaswater
+                         FILENAME SPE1CASE2_BRINE_GASWATER
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
                          REL_TOL ${rel_tol}
@@ -618,6 +667,13 @@ add_test_compareECLFiles(CASENAME co2store_diffusive
 
 add_test_compareECLFiles(CASENAME co2store_drsdtcon
                          FILENAME CO2STORE_DRSDTCON
+                         SIMULATOR flow
+                         ABS_TOL ${abs_tol}
+                         REL_TOL ${rel_tol}
+                         DIR co2store)
+
+add_test_compareECLFiles(CASENAME co2store_energy
+                         FILENAME CO2STORE_ENERGY
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
                          REL_TOL ${rel_tol}
@@ -1017,6 +1073,14 @@ add_test_compareECLFiles(CASENAME 0b_rocktab_model6
                          REL_TOL ${rel_tol}
                          DIR model6)
 
+add_test_compareECLFiles(CASENAME base_wt_tracer
+                         FILENAME BASE_WT_TRACER
+                         SIMULATOR flow
+                         ABS_TOL ${abs_tol}
+                         REL_TOL ${rel_tol}
+                         DIR tracer
+			 RESTART_STEP 1,3,7)
+
 # Restart tests
 opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-restart-regressionTest.sh "")
 
@@ -1181,6 +1245,15 @@ if(MPI_FOUND)
                                                  DIR aquifer-num
                                                  TEST_ARGS --enable-tuning=true --tolerance-cnv=0.00003 --time-step-control=pid --linsolver=cpr)
 
+# Single test to verify that we treat custom communicators correctly.
+  opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-split-comm-test.sh "")
+  add_test_split_comm(CASENAME spe1
+                      FILENAME SPE1CASE2
+                      SIMULATOR flow
+                      ABS_TOL 0.0
+                      REL_TOL 0.0)
+
+
   opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-parallel-regressionTest.sh "")
 
   # Different tolerances for these tests
@@ -1332,6 +1405,15 @@ endif()
                                        REL_TOL ${coarse_rel_tol_parallel}
                                        DIR udq_actionx
                                        TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-6)
+
+  add_test_compare_parallel_simulation(CASENAME 3_a_mpi_multflt_mod2
+                                       FILENAME 3_A_MPI_MULTFLT_SCHED_MODEL2
+                                       SIMULATOR flow
+                                       ABS_TOL ${abs_tol_parallel}
+                                       REL_TOL ${rel_tol_parallel}
+				       DIR model2
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
+
 endif()
 
 if(OPM_TESTS_ROOT)

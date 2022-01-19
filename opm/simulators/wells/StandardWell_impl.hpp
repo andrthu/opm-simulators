@@ -20,7 +20,7 @@
 */
 
 #include <opm/common/utility/numeric/RootFinders.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Well/WellInjectionProperties.hpp>
+#include <opm/input/eclipse/Schedule/Well/WellInjectionProperties.hpp>
 #include <opm/simulators/utils/DeferredLoggingErrorHelpers.hpp>
 #include <opm/simulators/linalg/MatrixBlock.hpp>
 #include <opm/simulators/wells/VFPHelpers.hpp>
@@ -466,6 +466,14 @@ namespace Opm
         }
         // Update the connection
         this->connectionRates_ = connectionRates;
+
+        // Accumulate dissolved gas and vaporized oil flow rates across all
+        // ranks sharing this well (this->index_of_well_).
+        {
+            const auto& comm = this->parallel_well_info_.communication();
+            ws.dissolved_gas_rate = comm.sum(ws.dissolved_gas_rate);
+            ws.vaporized_oil_rate = comm.sum(ws.vaporized_oil_rate);
+        }
 
         // accumulate resWell_ and invDuneD_ in parallel to get effects of all perforations (might be distributed)
         wellhelpers::sumDistributedWellEntries(this->invDuneD_[0][0], this->resWell_[0],
@@ -1741,13 +1749,13 @@ namespace Opm
             auto bhp_at_thp_limit = computeBhpAtThpLimitInj(ebos_simulator, summary_state, deferred_logger);
             if (bhp_at_thp_limit) {
                 const double bhp = std::min(*bhp_at_thp_limit, controls.bhp_limit);
-                computeWellRatesWithBhpIterations(ebos_simulator, bhp, potentials, deferred_logger);
+                computeWellRatesWithBhp(ebos_simulator, bhp, potentials, deferred_logger);
             } else {
                 deferred_logger.warning("FAILURE_GETTING_CONVERGED_POTENTIAL",
                                         "Failed in getting converged thp based potential calculation for well "
                                         + name() + ". Instead the bhp based value is used");
                 const double bhp = controls.bhp_limit;
-                computeWellRatesWithBhpIterations(ebos_simulator, bhp, potentials, deferred_logger);
+                computeWellRatesWithBhp(ebos_simulator, bhp, potentials, deferred_logger);
             }
         } else {
             computeWellRatesWithThpAlqProd(
@@ -1774,7 +1782,7 @@ namespace Opm
         if (bhp_at_thp_limit) {
             const auto& controls = this->well_ecl_.productionControls(summary_state);
             bhp = std::max(*bhp_at_thp_limit, controls.bhp_limit);
-            computeWellRatesWithBhpIterations(ebos_simulator, bhp, potentials, deferred_logger);
+            computeWellRatesWithBhp(ebos_simulator, bhp, potentials, deferred_logger);
         }
         else {
             deferred_logger.warning("FAILURE_GETTING_CONVERGED_POTENTIAL",
@@ -1782,7 +1790,7 @@ namespace Opm
                 + name() + ". Instead the bhp based value is used");
             const auto& controls = this->well_ecl_.productionControls(summary_state);
             bhp = controls.bhp_limit;
-            computeWellRatesWithBhpIterations(ebos_simulator, bhp, potentials, deferred_logger);
+            computeWellRatesWithBhp(ebos_simulator, bhp, potentials, deferred_logger);
         }
         return bhp;
     }

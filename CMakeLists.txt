@@ -287,6 +287,10 @@ macro (prereqs_hook)
 endmacro (prereqs_hook)
 
 macro (sources_hook)
+  if(OPENCL_FOUND)
+    include(opencl-source-provider)
+    list(APPEND opm-simulators_SOURCES ${PROJECT_BINARY_DIR}/clSources.cpp)
+  endif()
 endmacro (sources_hook)
 
 macro (fortran_hook)
@@ -382,8 +386,9 @@ set_property(TARGET moduleVersion PROPERTY POSITION_INDEPENDENT_CODE ON)
 add_dependencies(moduleVersion opmsimulators)
 
 set(FLOW_MODELS blackoil brine energy extbo foam gasoil gaswater
-                oilwater oilwater_brine oilwater_polymer
-                oilwater_polymer_injectivity micp polymer solvent)
+                oilwater oilwater_brine gaswater_brine oilwater_polymer
+                oilwater_polymer_injectivity micp polymer solvent
+                gasoil_energy brine_saltprecipitation)
 set(FLOW_VARIANT_MODELS brine_energy onephase onephase_energy)
 
 set(FLOW_TGTS)

@@ -23,7 +23,7 @@
 #include <opm/simulators/utils/DeferredLoggingErrorHelpers.hpp>
 #include <opm/core/props/phaseUsageFromDeck.hpp>
 
-#include <opm/parser/eclipse/Units/UnitSystem.hpp>
+#include <opm/input/eclipse/Units/UnitSystem.hpp>
 
 #include <opm/simulators/wells/VFPProperties.hpp>
 
@@ -1686,9 +1686,15 @@ namespace Opm {
                 const auto& intQuants = *(ebosSimulator_.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/0));
                 const auto& fs = intQuants.fluidState();
 
+                // we on only have one temperature pr cell any phaseIdx will do
                 double cellTemperatures = fs.temperature(/*phaseIdx*/0).value();
+
                 double weight_factor = 0.0;
-                for (int phaseIdx = 0; phaseIdx  < np; ++phaseIdx) {
+                for (unsigned phaseIdx = 0; phaseIdx < FluidSystem::numPhases; ++phaseIdx)
+                {
+                    if (!FluidSystem::phaseIsActive(phaseIdx)) {
+                        continue;
+                    }
                     cellInternalEnergy = fs.enthalpy(phaseIdx).value() - fs.pressure(phaseIdx).value() / fs.density(phaseIdx).value();
                     cellBinv = fs.invB(phaseIdx).value();
                     cellDensity = fs.density(phaseIdx).value();

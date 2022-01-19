@@ -25,6 +25,7 @@
 #include <flow/flow_ebos_blackoil.hpp>
 
 #include <flow/flow_ebos_gasoil.hpp>
+#include <flow/flow_ebos_gasoil_energy.hpp>
 #include <flow/flow_ebos_oilwater.hpp>
 #include <flow/flow_ebos_gaswater.hpp>
 #include <flow/flow_ebos_solvent.hpp>
@@ -32,22 +33,24 @@
 #include <flow/flow_ebos_extbo.hpp>
 #include <flow/flow_ebos_foam.hpp>
 #include <flow/flow_ebos_brine.hpp>
+#include <flow/flow_ebos_brine_saltprecipitation.hpp>
 #include <flow/flow_ebos_oilwater_brine.hpp>
+#include <flow/flow_ebos_gaswater_brine.hpp>
 #include <flow/flow_ebos_energy.hpp>
 #include <flow/flow_ebos_oilwater_polymer.hpp>
 #include <flow/flow_ebos_oilwater_polymer_injectivity.hpp>
 #include <flow/flow_ebos_micp.hpp>
 
-#include <opm/parser/eclipse/Deck/Deck.hpp>
-#include <opm/parser/eclipse/Parser/ErrorGuard.hpp>
-#include <opm/parser/eclipse/Parser/Parser.hpp>
-#include <opm/parser/eclipse/Parser/ParseContext.hpp>
-#include <opm/parser/eclipse/EclipseState/EclipseState.hpp>
-#include <opm/parser/eclipse/EclipseState/checkDeck.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/ArrayDimChecker.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/UDQ/UDQState.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Action/State.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Well/WellTestState.hpp>
+#include <opm/input/eclipse/Deck/Deck.hpp>
+#include <opm/input/eclipse/Parser/ErrorGuard.hpp>
+#include <opm/input/eclipse/Parser/Parser.hpp>
+#include <opm/input/eclipse/Parser/ParseContext.hpp>
+#include <opm/input/eclipse/EclipseState/EclipseState.hpp>
+#include <opm/input/eclipse/EclipseState/checkDeck.hpp>
+#include <opm/input/eclipse/Schedule/ArrayDimChecker.hpp>
+#include <opm/input/eclipse/Schedule/UDQ/UDQState.hpp>
+#include <opm/input/eclipse/Schedule/Action/State.hpp>
+#include <opm/input/eclipse/Schedule/Well/WellTestState.hpp>
 
 #include <opm/models/utils/propertysystem.hh>
 #include <opm/models/utils/parametersystem.hh>
@@ -152,26 +155,25 @@ public:
         initMPI();
     }
 
-#define DEMONSTRATE_RUN_WITH_NONWORLD_COMM 0
 
     ~Main()
     {
-#if DEMONSTRATE_RUN_WITH_NONWORLD_COMM
 #if HAVE_MPI
-        // Cannot use EclGenericVanguard::comm()
-        // to get world size here, as it may be
-        // a split communication at this point.
-        int world_size;
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-        if (world_size > 1) {
-            MPI_Comm new_comm = EclGenericVanguard::comm();
-            int result;
-            MPI_Comm_compare(MPI_COMM_WORLD, new_comm, &result);
-            assert(result == MPI_UNEQUAL);
-            MPI_Comm_free(&new_comm);
+        if (test_split_comm_) {
+            // Cannot use EclGenericVanguard::comm()
+            // to get world size here, as it may be
+            // a split communication at this point.
+            int world_size;
+            MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+            if (world_size > 1) {
+                MPI_Comm new_comm = EclGenericVanguard::comm();
+                int result;
+                MPI_Comm_compare(MPI_COMM_WORLD, new_comm, &result);
+                assert(result == MPI_UNEQUAL);
+                MPI_Comm_free(&new_comm);
+            }
         }
 #endif // HAVE_MPI
-#endif // DEMONSTRATE_RUN_WITH_NONWORLD_COMM
 
         EclGenericVanguard::setCommunication(nullptr);
 
@@ -205,9 +207,10 @@ public:
 #endif
         EclGenericVanguard::setCommunication(std::make_unique<Parallel::Communication>());
 
-#if DEMONSTRATE_RUN_WITH_NONWORLD_COMM
+        handleTestSplitCommunicatorCmdLine_();
+
 #if HAVE_MPI
-        if (EclGenericVanguard::comm().size() > 1) {
+        if (test_split_comm_ && EclGenericVanguard::comm().size() > 1) {
             int world_rank = EclGenericVanguard::comm().rank();
             int color = (world_rank == 0);
             MPI_Comm new_comm;
@@ -216,7 +219,6 @@ public:
             EclGenericVanguard::setCommunication(std::make_unique<Parallel::Communication>(new_comm));
         }
 #endif // HAVE_MPI
-#endif // DEMONSTRATE_RUN_WITH_NONWORLD_COMM
     }
 
     int runDynamic()
@@ -288,7 +290,7 @@ private:
         }
 
         // Twophase cases
-        else if (phases.size() == 2) {
+        else if (phases.size() == 2 && !eclipseState_->getSimulationConfig().isThermal()) {
             return this->runTwoPhase(phases);
         }
 
@@ -319,7 +321,7 @@ private:
 
         // Energy case
         else if (eclipseState_->getSimulationConfig().isThermal()) {
-            return this->runThermal();
+            return this->runThermal(phases);
         }
 
         // Blackoil case
@@ -536,6 +538,22 @@ private:
         }
     }
 
+    // This function is a special case, if the program has been invoked
+    // with the argument "--test-split-communicator=true" as the FIRST
+    // argument, it will be removed from the argument list and we set the
+    // test_split_comm_ flag to true.
+    // Note: initializing the parameter system before MPI could make this
+    // use the parameter system instead.
+    void handleTestSplitCommunicatorCmdLine_()
+    {
+        if (argc_ >= 2 && std::strcmp(argv_[1], "--test-split-communicator=true") == 0) {
+            test_split_comm_ = true;
+            --argc_;             // We have one less argument.
+            argv_[1] = argv_[0]; // What used to be the first proper argument now becomes the command argument.
+            ++argv_;             // Pretend this is what it always was.
+        }
+    }
+
     int runMICP(const Phases& phases)
     {
         if (!phases.active(Phase::WATER) || (phases.size() > 2)) {
@@ -630,24 +648,39 @@ private:
 
     int runBrine(const Phases& phases)
     {
-        if (! phases.active(Phase::WATER)) {
+        if (! phases.active(Phase::WATER) || phases.size() == 2) {
             if (outputCout_)
                 std::cerr << "No valid configuration is found for brine simulation, valid options include "
-                          << "oilwater + brine and blackoil + brine" << std::endl;
+                          << "oilwater + brine, gaswater + brine and blackoil + brine" << std::endl;
 
             return EXIT_FAILURE;
         }
 
-        if (phases.size() == 3) { // oil water brine case
-            flowEbosOilWaterBrineSetDeck(
+        if (phases.size() == 3) { 
+
+            if (phases.active(Phase::OIL)){ // oil water brine case
+                flowEbosOilWaterBrineSetDeck(
+                    setupTime_, deck_, eclipseState_, schedule_, summaryConfig_);
+                return flowEbosOilWaterBrineMain(argc_, argv_, outputCout_, outputFiles_);
+            }
+            if (phases.active(Phase::GAS)){ // gas water brine case
+                flowEbosGasWaterBrineSetDeck(
+                    setupTime_, deck_, eclipseState_, schedule_, summaryConfig_);
+                return flowEbosGasWaterBrineMain(argc_, argv_, outputCout_, outputFiles_);
+            }
+        }
+        else if (eclipseState_->getSimulationConfig().hasPRECSALT()) {
+            flowEbosBrineSaltPrecipitationSetDeck(
                 setupTime_, deck_, eclipseState_, schedule_, summaryConfig_);
-            return flowEbosOilWaterBrineMain(argc_, argv_, outputCout_, outputFiles_);
+            return flowEbosBrineSaltPrecipitationMain(argc_, argv_, outputCout_, outputFiles_);
         }
         else {
             flowEbosBrineSetDeck(
                 setupTime_, deck_, eclipseState_, schedule_, summaryConfig_);
             return flowEbosBrineMain(argc_, argv_, outputCout_, outputFiles_);
         }
+
+        return EXIT_FAILURE;
     }
 
     int runSolvent()
@@ -666,8 +699,15 @@ private:
         return flowEbosExtboMain(argc_, argv_, outputCout_, outputFiles_);
     }
 
-    int runThermal()
+    int runThermal(const Phases& phases)
     {
+        // oil-gas-thermal
+        if (!phases.active( Phase::WATER ) && phases.active( Phase::OIL ) && phases.active( Phase::GAS )) {
+            flowEbosGasOilEnergySetDeck(
+                setupTime_, deck_, eclipseState_, schedule_, summaryConfig_);
+            return flowEbosGasOilEnergyMain(argc_, argv_, outputCout_, outputFiles_);
+        }
+
         flowEbosEnergySetDeck(
             setupTime_, deck_, eclipseState_, schedule_, summaryConfig_);
 
@@ -707,6 +747,7 @@ private:
     std::shared_ptr<SummaryConfig> summaryConfig_{};
 
     // To demonstrate run with non_world_comm
+    bool test_split_comm_ = false;
     bool isSimulationRank_ = true;
 };
 

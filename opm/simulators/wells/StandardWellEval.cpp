@@ -107,15 +107,18 @@ relaxationFactorFractionsProducer(const std::vector<double>& primary_variables,
             const double original_sum = primary_variables[WFrac] + primary_variables[GFrac];
             const double relaxed_update = (dwells[0][WFrac] + dwells[0][GFrac]) * relaxation_factor;
             const double possible_updated_sum = original_sum - relaxed_update;
-
-            if (possible_updated_sum > 1.0) {
+            // We only relax if fraction is above 1.
+            // The newton solver should handle the rest
+            const double epsilon = 0.001;
+            if (possible_updated_sum > 1.0 + epsilon) {
+                // since the orignal sum <= 1.0 the epsilon asserts that
+                // the relaxed_update is non trivial.
                 assert(relaxed_update != 0.);
 
                 const double further_relaxation_factor = std::abs((1. - original_sum) / relaxed_update) * 0.95;
                 relaxation_factor *= further_relaxation_factor;
             }
         }
-
         assert(relaxation_factor >= 0.0 && relaxation_factor <= 1.0);
     }
     return relaxation_factor;
@@ -1122,6 +1125,8 @@ INSTANCE(BlackOilDefaultIndexTraits,BlackOilTwoPhaseIndices<0u,0u,0u,0u,false,tr
 INSTANCE(BlackOilDefaultIndexTraits,BlackOilTwoPhaseIndices<0u,0u,1u,0u,false,false,0u,2u,0u>)
 INSTANCE(BlackOilDefaultIndexTraits,BlackOilTwoPhaseIndices<0u,0u,1u,0u,false,true,0u,2u,0u>)
 INSTANCE(BlackOilDefaultIndexTraits,BlackOilTwoPhaseIndices<0u,0u,2u,0u,false,false,0u,2u,0u>)
+INSTANCE(BlackOilDefaultIndexTraits,BlackOilTwoPhaseIndices<0u,0u,0u,1u,false,false,0u,1u,0u>)
+INSTANCE(BlackOilDefaultIndexTraits,BlackOilTwoPhaseIndices<0u,0u,0u,0u,false,true,0u,0u,0u>)
 
 // Blackoil
 INSTANCE(BlackOilDefaultIndexTraits,BlackOilIndices<0u,0u,0u,0u,false,false,0u,0u>)

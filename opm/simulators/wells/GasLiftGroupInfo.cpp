@@ -70,7 +70,7 @@ getGroupIdx(const std::string& group_name)
 
 double
 GasLiftGroupInfo::
-gasRate(const std::string& group_name)
+gasRate(const std::string& group_name) const
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
     return group_rate.gasRate();
@@ -78,19 +78,58 @@ gasRate(const std::string& group_name)
 
 std::optional<double>
 GasLiftGroupInfo::
-gasTarget(const std::string& group_name)
+gasTarget(const std::string& group_name) const
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
     return group_rate.gasTarget();
 }
 
+double
+GasLiftGroupInfo::
+getRate(Rate rate_type, const std::string& group_name) const
+{
+    switch (rate_type) {
+    case Rate::oil:
+        return oilRate(group_name);
+    case Rate::gas:
+        return gasRate(group_name);
+    case Rate::water:
+        return waterRate(group_name);
+    case Rate::liquid:
+        return oilRate(group_name) + waterRate(group_name);
+    default:
+        // Need this to avoid compiler warning : control reaches end of non-void function
+        throw std::runtime_error("This should not happen");
+    }
+}
+
+
 std::tuple<double, double, double, double>
 GasLiftGroupInfo::
-getRates(int group_idx)
+getRates(const int group_idx) const
 {
     const auto& group_name = groupIdxToName(group_idx);
     auto& rates = this->group_rate_map_.at(group_name);
     return std::make_tuple(rates.oilRate(), rates.gasRate(), rates.waterRate(), rates.alq());
+}
+
+std::optional<double>
+GasLiftGroupInfo::
+getTarget(Rate rate_type, const std::string& group_name) const
+{
+    switch (rate_type) {
+    case Rate::oil:
+        return oilTarget(group_name);
+    case Rate::gas:
+        return gasTarget(group_name);
+    case Rate::water:
+        return waterTarget(group_name);
+    case Rate::liquid:
+        return liquidTarget(group_name);
+    default:
+        // Need this to avoid compiler warning : control reaches end of non-void function
+        throw std::runtime_error("This should not happen");
+    }
 }
 
 std::vector<std::pair<std::string,double>>&
@@ -103,7 +142,7 @@ getWellGroups(const std::string& well_name)
 
 const std::string&
 GasLiftGroupInfo::
-groupIdxToName(int group_idx)
+groupIdxToName(int group_idx) const
 {
     const std::string *group_name = nullptr;
     // TODO:  An alternative to the below loop is to set up a reverse map from idx ->
@@ -143,6 +182,14 @@ initialize()
 
 std::optional<double>
 GasLiftGroupInfo::
+liquidTarget(const std::string &group_name) const
+{
+    auto& group_rate = this->group_rate_map_.at(group_name);
+    return group_rate.liquidTarget();
+}
+
+std::optional<double>
+GasLiftGroupInfo::
 maxAlq(const std::string& group_name)
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
@@ -151,7 +198,7 @@ maxAlq(const std::string& group_name)
 
 double
 GasLiftGroupInfo::
-oilRate(const std::string &group_name)
+oilRate(const std::string &group_name) const
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
     return group_rate.oilRate();
@@ -159,15 +206,32 @@ oilRate(const std::string &group_name)
 
 std::optional<double>
 GasLiftGroupInfo::
-oilTarget(const std::string &group_name)
+oilTarget(const std::string &group_name) const
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
     return group_rate.oilTarget();
 }
 
+const std::string
+GasLiftGroupInfo::
+rateToString(Rate rate) {
+    switch (rate) {
+    case Rate::oil:
+        return "oil";
+    case Rate::gas:
+        return "gas";
+    case Rate::water:
+        return "water";
+    case Rate::liquid:
+        return "liquid";
+    default:
+        throw std::runtime_error("This should not happen");
+    }
+}
+
 double
 GasLiftGroupInfo::
-waterRate(const std::string &group_name)
+waterRate(const std::string &group_name) const
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
     return group_rate.waterRate();
@@ -175,18 +239,10 @@ waterRate(const std::string &group_name)
 
 std::optional<double>
 GasLiftGroupInfo::
-waterTarget(const std::string &group_name)
+waterTarget(const std::string &group_name) const
 {
     auto& group_rate = this->group_rate_map_.at(group_name);
     return group_rate.waterTarget();
-}
-
-std::optional<double>
-GasLiftGroupInfo::
-liquidTarget(const std::string &group_name)
-{
-    auto& group_rate = this->group_rate_map_.at(group_name);
-    return group_rate.liquidTarget();
 }
 
 void

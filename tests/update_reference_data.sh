@@ -58,6 +58,7 @@ declare -A tests
 # The key in the dictionary must agree with the name given to the test when
 # registering it with cmake in compareEclFiles.cmake. The SIMULATION_CASE should
 # be the basename of the .DATA file used for the simulation.
+
 tests[spe1]="flow spe1 SPE1CASE1"
 tests[spe12]="flow spe1 SPE1CASE2"
 tests[spe1_2p]="flow spe1 SPE1CASE2_2P"
@@ -69,6 +70,7 @@ tests[spe1_thermal_onephase]="flow_onephase_energy spe1 SPE1CASE2_THERMAL_ONEPHA
 tests[spe1_thermal_watvisc]="flow spe1 SPE1CASE2_THERMAL_WATVISC"
 tests[spe1_rockcomp]="flow spe1 SPE1CASE2_ROCK2DTR"
 tests[spe1_brine]="flow spe1_brine SPE1CASE1_BRINE"
+tests[spe1_brine_gaswater]="flow spe1_brine SPE1CASE2_BRINE_GASWATER"
 tests[spe1_water]="flow_onephase spe1 SPE1CASE1_WATER"
 tests[spe1_spider]="flow radial_grid SPIDER_CAKESLICE"
 tests[spe1_radial]="flow radial_grid RADIAL_CAKESLICE"
@@ -161,6 +163,7 @@ tests[3d_tran_operator]="flow parallel_fieldprops 3D_TRAN_OPERATOR"
 tests[co2store]="flow co2store CO2STORE"
 tests[co2store_diffusive]="flow co2store CO2STORE_DIFFUSIVE"
 tests[co2store_drsdtcon]="flow co2store CO2STORE_DRSDTCON"
+tests[co2store_energy]="flow co2store CO2STORE_ENERGY"
 tests[actionx_gconinje]="flow actionx ACTIONX_GCONINJE"
 tests[actionx_gconprod]="flow actionx ACTIONX_GCONPROD"
 tests[actionx_wconinje]="flow actionx ACTIONX_WCONINJE"
@@ -170,6 +173,7 @@ tests[micp]="flow micp MICP"
 tests[0_base_model6]="flow model6 0_BASE_MODEL6"
 tests[0a_aquct_model6]="flow model6 0A_AQUCT_MODEL6"
 tests[0b_rocktab_model6]="flow model6 0B_ROCKTAB_MODEL6"
+tests[base_wt_tracer]="flow tracer BASE_WT_TRACER"
 
 changed_tests=""
 
@@ -197,12 +201,20 @@ do
 
       if [ -d $configuration/build-opm-simulators/tests/results/$binary+$test_name/restart ]
       then
-        copyToReferenceDir \
-            $BUILD_DIR/tests/results/$binary+$test_name/restart/ \
-            $OPM_TESTS_ROOT/$dirname/opm-simulation-reference/$binary/restart \
-            ${casename}_RESTART \
-            EGRID INIT RFT SMSPEC UNRST UNSMRY
-        test $? -eq 0 && changed_tests="$changed_tests $test_name(restart)"
+
+        RSTEPS=`ls -1 $BUILD_DIR/tests/results/$binary+$test_name/restart/*.UNRST | sed -e 's/.*RESTART_*//' | sed 's/[.].*//' `
+        result=0
+        for RSTEP in $RSTEPS
+        do
+          copyToReferenceDir \
+              $BUILD_DIR/tests/results/$binary+$test_name/restart/ \
+              $OPM_TESTS_ROOT/$dirname/opm-simulation-reference/$binary/restart \
+              ${casename}_RESTART_${RSTEP} \
+              EGRID INIT RFT SMSPEC UNRST UNSMRY
+          res=$?
+          test $result -eq 0 || result=$res
+        done
+        test $result -eq 0 && changed_tests="$changed_tests $test_name(restart)"
       fi
     fi
   done

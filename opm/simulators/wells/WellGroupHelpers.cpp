@@ -21,8 +21,8 @@
 #include <config.h>
 #include <opm/simulators/wells/WellGroupHelpers.hpp>
 
-#include <opm/parser/eclipse/EclipseState/Schedule/Group/GConSump.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/Group/GConSale.hpp>
+#include <opm/input/eclipse/Schedule/Group/GConSump.hpp>
+#include <opm/input/eclipse/Schedule/Group/GConSale.hpp>
 #include <opm/simulators/utils/DeferredLogger.hpp>
 #include <opm/simulators/utils/DeferredLoggingErrorHelpers.hpp>
 #include <opm/simulators/wells/TargetCalculator.hpp>
@@ -703,7 +703,17 @@ namespace WellGroupHelpers
             if (network.node(node).add_gas_lift_gas()) {
                 const auto& group = schedule.getGroup(node, report_time_step);
                 for (const std::string& wellname : group.wells()) {
-                    node_inflows[node][BlackoilPhases::Vapour] += well_state.getALQ(wellname);
+                    const Well& well = schedule.getWell(wellname, report_time_step);
+                    // Here we use the efficiency unconditionally, but if WEFAC item 3
+                    // for the well is false (it defaults to true) then we should NOT use
+                    // the efficiency factor. Fixing this requires not only changing the
+                    // code here, but also:
+                    //    - Adding a member to the well for this flag, and setting it in Schedule::handleWEFAC().
+                    //    - Making the wells' maximum flows (i.e. not time-averaged by using a efficiency factor)
+                    //      available and using those (for wells with WEFAC(3) true only) when accumulating group
+                    //      rates, but ONLY for network calculations.
+                    const double efficiency = well.getEfficiencyFactor();
+                    node_inflows[node][BlackoilPhases::Vapour] += well_state.getALQ(wellname) * efficiency;
                 }
             }
         }

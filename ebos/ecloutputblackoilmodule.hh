@@ -39,8 +39,8 @@
 
 #include <opm/material/common/Valgrind.hpp>
 
-#include <opm/parser/eclipse/Units/Units.hpp>
-#include <opm/parser/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
+#include <opm/input/eclipse/Units/Units.hpp>
+#include <opm/input/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
 #include <opm/output/data/Cells.hpp>
 #include <opm/output/eclipse/EclipseIO.hpp>
 #include <opm/common/OpmLog/OpmLog.hpp>
@@ -135,6 +135,7 @@ public:
                    getPropValue<TypeTag, Properties::EnablePolymer>(),
                    getPropValue<TypeTag, Properties::EnableFoam>(),
                    getPropValue<TypeTag, Properties::EnableBrine>(),
+                   getPropValue<TypeTag, Properties::EnableSaltPrecipitation>(),
                    getPropValue<TypeTag, Properties::EnableExtbo>(),
                    getPropValue<TypeTag, Properties::EnableMICP>())
          , simulator_(simulator)
@@ -332,6 +333,14 @@ public:
                 this->cSalt_[globalDofIdx] = fs.saltConcentration().value();
             }
 
+            if (!this->pSalt_.empty()) {
+                this->pSalt_[globalDofIdx] = intQuants.saltSaturation().value();
+            }
+
+            if (!this->permFact_.empty()) {
+                this->permFact_[globalDofIdx] = intQuants.permFactor().value();
+            }
+            
             if (!this->extboX_.empty()) {
                 this->extboX_[globalDofIdx] = intQuants.xVolume().value();
             }
@@ -625,8 +634,9 @@ public:
         }
 
         if (simulator_.vanguard().eclState().fieldProps().has_double("SWATINIT")) {
-            auto oilWaterScaledEpsInfoDrainage = simulator.problem().materialLawManager()->oilWaterScaledEpsInfoDrainagePointerReferenceHack(elemIdx);
-            oilWaterScaledEpsInfoDrainage->maxPcow =  this->ppcw_[elemIdx];
+            const auto& oilWaterScaledEpsInfoDrainage =
+                simulator.problem().materialLawManager()->oilWaterScaledEpsInfoDrainage(elemIdx);
+            const_cast<EclEpsScalingPointsInfo<Scalar>&>(oilWaterScaledEpsInfoDrainage).maxPcow = this->ppcw_[elemIdx];
         }
 
     }
