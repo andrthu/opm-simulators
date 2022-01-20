@@ -459,14 +459,13 @@ void openclSolverBackend<block_size>::initialize2(int N_, int nnz_, int dim, dou
     out.clear();
 
     try {
-        prec->setOpenCLContext(context.get());
-        prec->setOpenCLQueue(queue.get());
+	prec->setOpencl(context, queue);
 
 #if COPY_ROW_BY_ROW
         vals_contiguous = new double[N];
 #endif
-        mat.reset(new BlockedMatrix<block_size>(Nb, nnzb, vals, cols, rows));
-	jacMat.reset(new BlockedMatrix<block_size>(Nb, jac_nnzb, vals2, cols2, rows2));
+        mat.reset(new BlockedMatrix(Nb, nnzb, block_size,vals, cols, rows));
+	jacMat.reset(new BlockedMatrix(Nb, jac_nnzb, block_size, vals2, cols2, rows2));
 
         d_x = cl::Buffer(*context, CL_MEM_READ_WRITE, sizeof(double) * N);
         d_b = cl::Buffer(*context, CL_MEM_READ_WRITE, sizeof(double) * N);
@@ -589,13 +588,10 @@ template <unsigned int block_size>
 bool openclSolverBackend<block_size>::analyze_matrix() {
     Timer t;
 
-<<<<<<< HEAD
-    //bool success = prec->init(mat.get());
-    bool success = prec->init(mat.get(), jacMat.get());
-=======
+    //bool success = prec->init(mat.get(), jacMat.get());
+
     // bool success = bilu0->init(mat.get());
-    bool success = prec->analyze_matrix(mat.get());
->>>>>>> 8bf6c9f2b56c7e940dde6883f1cfbb86710115a3
+    bool success = prec->analyze_matrix(mat.get(), jacMat.get());
 
     if (opencl_ilu_reorder == ILUReorder::NONE) {
         rmat = mat.get();
@@ -737,7 +733,7 @@ SolverStatus openclSolverBackend<block_size>::solve_system2(int N_, int nnz_, in
     if (initialized == false) {
         initialize2(N_, nnz_,  dim, vals, rows, cols, nnz2, vals2, rows2, cols2);
         if (analysis_done == false) {
-            if (!analyse_matrix()) {
+            if (!analyze_matrix()) {
                 return SolverStatus::BDA_SOLVER_ANALYSIS_FAILED;
             }
         }

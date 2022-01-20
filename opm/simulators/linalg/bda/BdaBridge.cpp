@@ -231,7 +231,7 @@ void BdaBridge<BridgeMatrix, BridgeVector, block_size>::solve_system([[maybe_unu
 	if (bm_h_rows.capacity() == 0) {
             bm_h_rows.reserve(Nb+1);
             bm_h_cols.reserve(bm_nnzb);
-            getSparsityPattern(*blockMat, bm_h_rows, bm_h_cols);
+            copySparsityPatternFromISTL(*blockMat, bm_h_rows, bm_h_cols);
         }
 
         Dune::Timer t_zeros;

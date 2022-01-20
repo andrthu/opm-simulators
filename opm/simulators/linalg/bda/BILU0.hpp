@@ -98,13 +98,15 @@ public:
 
     // analysis, find reordering if specified
     bool analyze_matrix(BlockedMatrix *mat) override;
-
+    
+    bool analyze_matrix(BlockedMatrix *mat, BlockedMatrix *jacMat) override;
+    
     // ilu_decomposition
     bool create_preconditioner(BlockedMatrix *mat) override;
 
-    bool init(BlockedMatrix<block_size> *mat, BlockedMatrix<block_size> *jacMat);
+    //bool init(BlockedMatrix<block_size> *mat, BlockedMatrix<block_size> *jacMat);
 
-    bool create_preconditioner(BlockedMatrix<block_size> *mat, BlockedMatrix<block_size> *jacMat);
+    bool create_preconditioner(BlockedMatrix *mat, BlockedMatrix *jacMat) override;
 
     // apply preconditioner, x = prec(y)
     void apply(const cl::Buffer& y, cl::Buffer& x) override;
@@ -134,7 +136,7 @@ public:
         return std::make_pair(s.LUvals, s.invDiagVals);
     }
 
-    BlockedMatrix<block_size>* getRJacMat()
+    BlockedMatrix* getRJacMat()
     {
 	return rJacMat.get();
     }
