@@ -88,6 +88,7 @@ bool BISAI<block_size>::analyze_matrix(BlockedMatrix *mat)
 template <unsigned int block_size>
 bool BISAI<block_size>::analyze_matrix(BlockedMatrix *mat, BlockedMatrix *jacMat)
 {
+    (void) jacMat;
     return analyze_matrix(mat);
 }
 
@@ -257,6 +258,7 @@ bool BISAI<block_size>::create_preconditioner(BlockedMatrix *mat)
 template <unsigned int block_size>
 bool BISAI<block_size>::create_preconditioner(BlockedMatrix *mat, BlockedMatrix *jacMat)
 {
+    (void) jacMat;
     return create_preconditioner(mat);
 }
 

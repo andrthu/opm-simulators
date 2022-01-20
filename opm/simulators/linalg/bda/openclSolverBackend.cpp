@@ -588,11 +588,12 @@ template <unsigned int block_size>
 bool openclSolverBackend<block_size>::analyze_matrix() {
     Timer t;
 
-    //bool success = prec->init(mat.get(), jacMat.get());
-
     // bool success = bilu0->init(mat.get());
-    bool success = prec->analyze_matrix(mat.get(), jacMat.get());
-
+    bool success;
+    if (blockJacVersion)
+	success = prec->analyze_matrix(mat.get(), jacMat.get());
+    else
+	success = prec->analyze_matrix(mat.get());
     if (opencl_ilu_reorder == ILUReorder::NONE) {
         rmat = mat.get();
     } else {
@@ -642,7 +643,11 @@ template <unsigned int block_size>
 bool openclSolverBackend<block_size>::create_preconditioner() {
     Timer t;
 
-    bool result = prec->create_preconditioner(mat.get(), jacMat.get());
+    bool result;
+    if (blockJacVersion)
+	result = prec->create_preconditioner(mat.get(), jacMat.get());
+    else
+	result = prec->create_preconditioner(mat.get());
 
     if (verbosity > 2) {
         std::ostringstream out;
@@ -731,6 +736,7 @@ SolverStatus openclSolverBackend<block_size>::solve_system2(int N_, int nnz_, in
 			   WellContributions& wellContribs, BdaResult &res)
 {
     if (initialized == false) {
+	blockJacVersion = true;
         initialize2(N_, nnz_,  dim, vals, rows, cols, nnz2, vals2, rows2, cols2);
         if (analysis_done == false) {
             if (!analyze_matrix()) {

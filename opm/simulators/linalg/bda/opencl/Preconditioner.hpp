@@ -69,9 +69,9 @@ public:
     // analyze matrix, e.g. the sparsity pattern
     // probably only called once
     virtual bool analyze_matrix(BlockedMatrix *mat) = 0;
-  
+
     virtual bool analyze_matrix(BlockedMatrix *mat, BlockedMatrix *jacMat) = 0;
-    
+
     // create/update preconditioner, probably used every linear solve
     virtual bool create_preconditioner(BlockedMatrix *mat) = 0;
 
