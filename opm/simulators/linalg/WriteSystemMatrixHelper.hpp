@@ -34,7 +34,8 @@ namespace Helper
     void writeSystem(const SimulatorType& simulator,
                      const MatrixType& matrix,
                      const VectorType& rhs,
-                     [[maybe_unused]] const Communicator* comm)
+                     [[maybe_unused]] const Communicator* comm,
+		     int prevIter)
     {
         std::string dir = simulator.problem().outputDir();
         if (dir == ".") {
@@ -55,29 +56,38 @@ namespace Helper
         oss << std::setprecision(15) << std::setw(12) << std::setfill('0') << simulator.time() << "_";
         int nit = simulator.model().newtonMethod().numIterations();
         oss << "_nit_" << nit << "_";
+	oss << "_ILU-iter_" << prevIter << "_";
         std::string output_file(oss.str());
         fs::path full_path = output_dir / output_file;
         std::string prefix = full_path.string();
         {
             std::string filename = prefix + "matrix_istl";
+	    std::ofstream filename2(filename.c_str());
+	    filename2.precision (std::numeric_limits<double>::digits10 + 1);
 #if HAVE_MPI
             if (comm != nullptr) { // comm is not set in serial runs
-                Dune::storeMatrixMarket(matrix, filename, *comm, true);
+                //Dune::storeMatrixMarket(matrix, filename, *comm, true);
+		Dune::writeMatrixMarket(matrix, filename2);
             } else
 #endif
             {
-                Dune::storeMatrixMarket(matrix, filename + ".mm");
+                //Dune::storeMatrixMarket(matrix, filename + ".mm");
+		Dune::writeMatrixMarket(matrix, filename2);
             }
         }
         {
             std::string filename = prefix + "rhs_istl";
+	    std::ofstream filename2(filename.c_str());
+	    filename2.precision (std::numeric_limits<double>::digits10 + 1);
 #if HAVE_MPI
             if (comm != nullptr) { // comm is not set in serial runs
-                Dune::storeMatrixMarket(rhs, filename, *comm, true);
+                //Dune::storeMatrixMarket(rhs, filename, *comm, true);
+		Dune::writeMatrixMarket(rhs, filename2);
             } else
 #endif
             {
-                Dune::storeMatrixMarket(rhs, filename + ".mm");
+                //Dune::storeMatrixMarket(rhs, filename + ".mm");
+		Dune::writeMatrixMarket(rhs, filename2);
             }
         }
     }

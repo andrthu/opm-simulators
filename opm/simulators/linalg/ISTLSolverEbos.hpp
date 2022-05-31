@@ -179,7 +179,7 @@ namespace Opm
             }
 
             interiorCellNum_ = detail::numMatrixRowsToUseInSolver(simulator_.vanguard().grid(), true);
-
+	    prevIter_ = 0;
             // Print parameters to PRT/DBG logs.
             if (on_io_rank) {
                 std::ostringstream os;
@@ -245,11 +245,16 @@ namespace Opm
             // Write linear system if asked for.
             const int verbosity = prm_.get<int>("verbosity", 0);
             const bool write_matrix = verbosity > 10;
+	    Vector rhs_copy;
             if (write_matrix) {
-                Helper::writeSystem(simulator_, //simulator is only used to get names
-                                    getMatrix(),
-                                    *rhs_,
-                                    comm_.get());
+		rhs_copy = Vector(*rhs_);
+		if (false) {//prevIter_ > 10) {
+		    Helper::writeSystem(simulator_, //simulator is only used to get names
+					getMatrix(),
+					*rhs_,
+					comm_.get(),
+					0);
+		}
             }
 
             // Solve system.
@@ -296,7 +301,17 @@ namespace Opm
                 assert(flexibleSolver_);
                 flexibleSolver_->apply(x, *rhs_, result);
             }
-
+					      
+	    prevIter_ = result.iterations;
+	    if (write_matrix) {
+		if (prevIter_ > 40) {
+		    Helper::writeSystem(simulator_, //simulator is only used to get names
+					getMatrix(),
+					rhs_copy,
+					comm_.get(),
+					prevIter_);
+		}
+	    }
             // Check convergence, iterations etc.
             checkConvergence(result);
 
@@ -530,6 +545,7 @@ namespace Opm
         FlowLinearSolverParameters parameters_;
         PropertyTree prm_;
         bool scale_variables_;
+	int prevIter_;
 
         std::shared_ptr< CommunicationType > comm_;
     }; // end ISTLSolver
