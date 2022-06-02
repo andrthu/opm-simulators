@@ -912,7 +912,7 @@ public:
     {
         if( comm_ ) {
             comm_->copyOwnerToAll(v, v);
-        }
+	}
     }
 
     /*!
