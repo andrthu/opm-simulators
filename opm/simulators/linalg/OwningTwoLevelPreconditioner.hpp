@@ -20,6 +20,7 @@
 #ifndef OPM_OWNINGTWOLEVELPRECONDITIONER_HEADER_INCLUDED
 #define OPM_OWNINGTWOLEVELPRECONDITIONER_HEADER_INCLUDED
 
+#include <opm/simulators/linalg/WellOperators.hpp>
 #include <opm/simulators/linalg/PreconditionerWithUpdate.hpp>
 #include <opm/simulators/linalg/PressureSolverPolicy.hpp>
 #include <opm/simulators/linalg/PressureTransferPolicy.hpp>
@@ -177,7 +178,8 @@ private:
     using PressureVectorType = Dune::BlockVector<Dune::FieldVector<double, 1>>;
     using SeqCoarseOperatorType = Dune::MatrixAdapter<PressureMatrixType, PressureVectorType, PressureVectorType>;
     using ParCoarseOperatorType
-        = Dune::OverlappingSchwarzOperator<PressureMatrixType, PressureVectorType, PressureVectorType, Communication>;
+        = Opm::GhostLastMatrixAdapter<PressureMatrixType, PressureVectorType, PressureVectorType, Communication>;
+    //= Dune::OverlappingSchwarzOperator<PressureMatrixType, PressureVectorType, PressureVectorType, Communication>;
     using CoarseOperatorType = std::conditional_t<std::is_same<Communication, Dune::Amg::SequentialInformation>::value,
                                                   SeqCoarseOperatorType,
                                                   ParCoarseOperatorType>;

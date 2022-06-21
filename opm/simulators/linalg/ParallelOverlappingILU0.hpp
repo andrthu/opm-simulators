@@ -155,6 +155,8 @@ struct ConstructionTraits<Opm::ParallelOverlappingILU0<Matrix,Domain,Range,Paral
 
 };
 
+
+
 } // end namespace Amg
 
 
@@ -587,6 +589,66 @@ namespace Opm
         }
         assert(colcount == numUpper);
       }
+
+      /*
+      size_t set_interiorSize(size_t N, size_t interiorSize, const Dune::Amg::SequentialInformation& comm)
+      {
+	  DUNE_UNUSED_PARAMETER(N);
+	  DUNE_UNUSED_PARAMETER(comm);
+	  return interiorSize;
+      }
+
+      size_t set_interiorSize(size_t N, size_t interiorSize, const Dune::OwnerOverlapCopyCommunication<int,int>& comm)
+      {
+	  if (interiorSize<N)
+	      return interiorSize;
+	  auto indexSet = comm.indexSet();
+
+	  size_t new_is = 0;
+	  for (auto idx = indexSet.begin(); idx!=indexSet.end(); ++idx) {
+
+	      if (idx->local().attribute()==1)
+		  new_is = idx->local().local();
+	  }
+	  return new_is;
+      }
+      */
+      template <class PI>
+      class InteriorSizeSetter
+      {
+      public:
+	  size_t set_interiorSize(size_t N, size_t interiorSize, const PI& comm)
+	  {
+	      DUNE_UNUSED_PARAMETER(N);
+	      DUNE_UNUSED_PARAMETER(comm);
+	      return interiorSize;
+	  }
+      };
+
+      template<>
+      class InteriorSizeSetter<Dune::OwnerOverlapCopyCommunication<int,int>>
+      {
+      public:
+	  size_t set_interiorSize(size_t N, size_t interiorSize, const Dune::OwnerOverlapCopyCommunication<int,int>& comm)
+	  {
+	      if (interiorSize<N)
+		  return interiorSize;
+	      auto indexSet = comm.indexSet();
+
+	      size_t new_is = 0;
+	      for (auto idx = indexSet.begin(); idx!=indexSet.end(); ++idx) {
+
+		  if (idx->local().attribute()==1) {
+		      auto loc = idx->local().local();
+		      if (loc > new_is) {
+			  new_is = loc;
+		      }
+		  }
+	      }
+	      return new_is + 1;
+	  }
+      };
+	
     } // end namespace detail
 
 
@@ -979,6 +1041,12 @@ public:
         try
         {
             if( iluIteration_ == 0 ) {
+
+		if (comm_) {
+		    detail::InteriorSizeSetter<ParallelInfoT> iss;
+		    interiorSize_ = iss.set_interiorSize(A_->N(), interiorSize_, *comm_);
+		}
+
                 // create ILU-0 decomposition
                 if ( ordering_.empty() )
                 {

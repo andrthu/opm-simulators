@@ -378,7 +378,8 @@ namespace Opm
                 if (isParallel()) {
 #if HAVE_MPI
                     if (useWellConn_) {
-                        using ParOperatorType = Dune::OverlappingSchwarzOperator<Matrix, Vector, Vector, Comm>;
+                        //using ParOperatorType = Dune::OverlappingSchwarzOperator<Matrix, Vector, Vector, Comm>;
+			using ParOperatorType = Opm::GhostLastMatrixAdapter<Matrix, Vector, Vector, Comm>;
                         linearOperatorForFlexibleSolver_ = std::make_unique<ParOperatorType>(getMatrix(), *comm_);
                         flexibleSolver_ = std::make_unique<FlexibleSolverType>(*linearOperatorForFlexibleSolver_, *comm_, prm_, weightsCalculator,
                                                                                pressureIndex);

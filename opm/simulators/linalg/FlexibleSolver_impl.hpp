@@ -25,6 +25,7 @@
 #include <opm/simulators/linalg/ilufirstelement.hh>
 #include <opm/simulators/linalg/FlexibleSolver.hpp>
 #include <opm/simulators/linalg/PreconditionerFactory.hpp>
+#include <opm/simulators/linalg/WellOperators.hpp>
 
 #include <dune/common/fmatrix.hh>
 #include <dune/istl/bcrsmatrix.hh>
@@ -105,7 +106,7 @@ namespace Dune
                  std::size_t pressureIndex)
     {
         // Parallel case.
-        using ParOperatorType = Dune::OverlappingSchwarzOperator<MatrixType, VectorType, VectorType, Comm>;
+        using ParOperatorType = Opm::GhostLastMatrixAdapter<MatrixType, VectorType, VectorType, Comm>;//Dune::OverlappingSchwarzOperator<MatrixType, VectorType, VectorType, Comm>;
         linearoperator_for_solver_ = &op;
         auto op_prec = std::make_shared<ParOperatorType>(op.getmat(), comm);
         auto child = prm.get_child_optional("preconditioner");

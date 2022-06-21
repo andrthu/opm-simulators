@@ -25,6 +25,8 @@
 #include <opm/simulators/linalg/OwningBlockPreconditioner.hpp>
 #include <opm/simulators/linalg/OwningTwoLevelPreconditioner.hpp>
 #include <opm/simulators/linalg/ParallelOverlappingILU0.hpp>
+#include <opm/simulators/linalg/WellOperators.hpp>
+
 #include <opm/simulators/linalg/PreconditionerWithUpdate.hpp>
 #include <opm/simulators/linalg/PropertyTree.hpp>
 #include <opm/simulators/linalg/amgcpr.hh>
@@ -298,7 +300,7 @@ private:
         // is the overlapping schwarz operator. This could be extended
         // later, but at this point no other operators are compatible
         // with the AMG hierarchy construction.
-        if constexpr (std::is_same_v<O, Dune::OverlappingSchwarzOperator<M, V, V, C>>) {
+	if constexpr (std::is_same_v<O, Dune::OverlappingSchwarzOperator<M, V, V, C>> || std::is_same_v<O, Opm::GhostLastMatrixAdapter<M, V, V, C>>) {
             doAddCreator("amg", [](const O& op, const P& prm, const std::function<Vector()>&, std::size_t, const C& comm) {
                 const std::string smoother = prm.get<std::string>("smoother", "ParOverILU0");
                 if (smoother == "ILU0" || smoother == "ParOverILU0") {

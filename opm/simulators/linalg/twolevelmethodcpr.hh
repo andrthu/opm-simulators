@@ -18,6 +18,7 @@
 #include<dune/common/unused.hh>
 #include<dune/common/version.hh>
 
+#include <dune/common/timer.hh>
 /**
  * @addtogroup ISTL_PAAMG
  * @{
@@ -496,7 +497,6 @@ public:
     *context.update += *context.lhs;
     // Postsmoothing
     postsmooth(context, postSteps_);
-
   }
 //   //! Category of the preconditioner (see SolverCategory::Category)
     virtual SolverCategory::Category category() const
