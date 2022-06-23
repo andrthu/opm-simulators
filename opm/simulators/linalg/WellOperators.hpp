@@ -313,6 +313,8 @@ public:
 
     virtual const matrix_type& getmat() const override { return *A_; }
 
+    size_t getInteriorSize() const { return interiorSize_;}
+
 private:
     void ghostLastProject(Y& y) const
     {

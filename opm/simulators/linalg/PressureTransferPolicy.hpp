@@ -48,6 +48,9 @@ public:
     {
         using CoarseMatrix = typename CoarseOperator::matrix_type;
         const auto& fineLevelMatrix = fineOperator.getmat();
+	setIS(fineOperator);
+	interiorSize_ = fineLevelMatrix.N();
+	if (communication_->communicator().rank() == 0) {std::cout<< interiorSize_<<" "<< fineLevelMatrix.N() << std::endl;}
         coarseLevelMatrix_.reset(new CoarseMatrix(fineLevelMatrix.N(), fineLevelMatrix.M(), CoarseMatrix::row_wise));
         auto createIter = coarseLevelMatrix_->createbegin();
 
@@ -58,6 +61,7 @@ public:
             ++createIter;
         }
 
+	//calculateCoarseGhostEntries(fineLevelMatrix.N());
         calculateCoarseEntries(fineOperator);
         coarseLevelCommunication_.reset(communication_, [](Communication*) {});
 
@@ -78,7 +82,8 @@ public:
         const auto& fineMatrix = fineOperator.getmat();
         *coarseLevelMatrix_ = 0;
         auto rowCoarse = coarseLevelMatrix_->begin();
-        for (auto row = fineMatrix.begin(), rowEnd = fineMatrix.end(); row != rowEnd; ++row, ++rowCoarse) {
+        //for (auto row = fineMatrix.begin(), rowEnd = fineMatrix.end(); row != rowEnd; ++row, ++rowCoarse) {
+	for (auto row = fineMatrix.begin(); row.index() < interiorSize_; ++row, ++rowCoarse) {
             assert(row.index() == rowCoarse.index());
             auto entryCoarse = rowCoarse->begin();
             for (auto entry = row->begin(), entryEnd = row->end(); entry != entryEnd; ++entry, ++entryCoarse) {
@@ -98,7 +103,15 @@ public:
                 (*entryCoarse) = matrix_el;
             }
         }
-        assert(rowCoarse == coarseLevelMatrix_->end());
+        //assert(rowCoarse == coarseLevelMatrix_->end());
+	calculateCoarseGhostEntries(fineMatrix.N());
+    }
+
+    void calculateCoarseGhostEntries(size_t numRows)
+    {
+	for (size_t row = interiorSize_; row < numRows; ++row) {
+	    (*coarseLevelMatrix_)[row][row] = 1.0;
+	}
     }
 
     virtual void moveToCoarseLevel(const typename ParentType::FineRangeType& fine) override
@@ -106,9 +119,9 @@ public:
         // Set coarse vector to zero
         this->rhs_ = 0;
 
-        auto end = fine.end(), begin = fine.begin();
+        auto begin = fine.begin();
 
-        for (auto block = begin; block != end; ++block) {
+        for (auto block = begin; block.index() < interiorSize_; ++block) {
             const auto& bw = weights_[block.index()];
             double rhs_el = 0.0;
             if (transpose) {
@@ -126,9 +139,10 @@ public:
 
     virtual void moveToFineLevel(typename ParentType::FineDomainType& fine) override
     {
-        auto end = fine.end(), begin = fine.begin();
+        //auto end = fine.end();
+	auto begin = fine.begin();
 
-        for (auto block = begin; block != end; ++block) {
+        for (auto block = begin; block.index() < interiorSize_; ++block) {
             if (transpose) {
                 const auto& bw = weights_[block.index()];
                 for (size_t i = 0; i < block->size(); ++i) {
@@ -155,11 +169,17 @@ public:
         return pressure_var_index_;
     }
 private:
+
+    template<class O>
+    void setIS(const O& ad) {interiorSize_ = ad.getmat().N();}
+
+    void setIS(const GhostLastMatrixAdapter<typename FineOperator::matrix_type,FineVectorType,FineVectorType,Communication>& ad){interiorSize_ = ad.getInteriorSize();}
     Communication* communication_;
     const FineVectorType& weights_;
     const std::size_t pressure_var_index_;
     std::shared_ptr<Communication> coarseLevelCommunication_;
     std::shared_ptr<typename CoarseOperator::matrix_type> coarseLevelMatrix_;
+    std::size_t interiorSize_;
 };
 
 } // namespace Opm
