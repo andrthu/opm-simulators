@@ -504,6 +504,10 @@ public:
       return SolverCategory::sequential;
     }
 
+  CoarseLevelSolver* getCoarseSolver() const
+  {
+    return coarseSolver_;
+  }
 private:
   /**
    * @brief Struct containing the level information.
