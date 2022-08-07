@@ -30,6 +30,23 @@ namespace Opm
 {
 namespace Helper
 {
+    /*
+    bool whenToWrite(int rs, int numPrints)
+    {
+	const std::vector<int> v = {0, 9, 19, 29, 39, 49, 58,
+				    68, 78, 85, 94, 100, 105,
+				    110, 115, 120, 125, 138, 142};
+
+	if ( numPrints < v.size()) {
+	    if (rs == v[numPrints])
+		return true;
+	    if (rs > v[numPrints])
+		return true;
+	}
+	
+	return false;
+    }
+    */
     template <class SimulatorType, class MatrixType, class VectorType, class Communicator>
     void writeSystem(const SimulatorType& simulator,
                      const MatrixType& matrix,

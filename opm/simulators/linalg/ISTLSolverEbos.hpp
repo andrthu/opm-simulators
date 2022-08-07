@@ -180,6 +180,7 @@ namespace Opm
 
             interiorCellNum_ = detail::numMatrixRowsToUseInSolver(simulator_.vanguard().grid(), true);
 	    prevIter_ = 0;
+	    numPrints_ = 0;
             // Print parameters to PRT/DBG logs.
             if (on_io_rank) {
                 std::ostringstream os;
@@ -304,12 +305,30 @@ namespace Opm
 					      
 	    prevIter_ = result.iterations;
 	    if (write_matrix) {
-		if (prevIter_ > 40) {
-		    Helper::writeSystem(simulator_, //simulator is only used to get names
-					getMatrix(),
-					rhs_copy,
-					comm_.get(),
-					prevIter_);
+		if (prevIter_ > 20) {
+		    /*
+		    const std::vector<int> v_ = {0, 9, 19, 29, 39, 49, 58,
+						 68, 78, 85, 94, 100, 105,
+						 110, 115, 120, 125, 138, 142};
+		    */
+		    const std::vector<int> v_ = {48, 49, 52, 54, 55, 56, 58, 59, 60, 61, 62, 63,
+						 64, 65, 67, 68, 69, 70, 71, 72, 73, 75, 77, 78, 80, 82,
+						 85, 87, 89, 92, 94, 100, 105,
+						 110, 115, 120, 125, 138, 142};
+		    //bool doWrite = Helper::whenToWrite(simulator_.episodeIndex(), numPrints_);
+		    bool doWrite = false;
+		    if (simulator_.episodeIndex() == v_[numPrints_])
+			doWrite = true;
+		    if (simulator_.episodeIndex() > v_[numPrints_])
+			doWrite = true;
+		    if (doWrite) {
+			Helper::writeSystem(simulator_, //simulator is only used to get names
+					    getMatrix(),
+					    rhs_copy,
+					    comm_.get(),
+					    prevIter_);
+			numPrints_ += 1;
+		    }
 		}
 	    }
             // Check convergence, iterations etc.
@@ -547,7 +566,8 @@ namespace Opm
         PropertyTree prm_;
         bool scale_variables_;
 	int prevIter_;
-
+	int numPrints_;
+	
         std::shared_ptr< CommunicationType > comm_;
     }; // end ISTLSolver
 
