@@ -914,8 +914,8 @@ public:
     */
     virtual void apply (Domain& v, const Range& d) override
     {
-        Range& md = reorderD(d);
-        Domain& mv = reorderV(v);
+        //Range& md = reorderD(d);
+        //Domain& mv = reorderV(v);
 
         // iterator types
         typedef typename Range ::block_type  dblock;
@@ -933,40 +933,48 @@ public:
         // lower triangular solve
         for( size_type i=0; i<lowerLoopEnd; ++ i )
         {
-          dblock rhs( md[ i ] );
+	    //dblock rhs( md[ i ] );
+	  dblock rhs( d[ i ] );
           const size_type rowI     = lower_.rows_[ i ];
           const size_type rowINext = lower_.rows_[ i+1 ];
 
           for( size_type col = rowI; col < rowINext; ++ col )
           {
-            lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
+	      //lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
+	    lower_.values_[ col ].mmv( v[ lower_.cols_[ col ] ], rhs );
           }
 
-          mv[ i ] = rhs;  // Lii = I
+          //mv[ i ] = rhs;  // Lii = I
+	  v[ i ] = rhs;  // Lii = I
         }
 
         for( size_type i=upperLoppStart; i<iEnd; ++ i )
         {
-            vblock& vBlock = mv[ lastRow - i ];
+            //vblock& vBlock = mv[ lastRow - i ];
+	    vblock& vBlock = v[ lastRow - i ];
             vblock rhs ( vBlock );
             const size_type rowI     = upper_.rows_[ i ];
             const size_type rowINext = upper_.rows_[ i+1 ];
 
             for( size_type col = rowI; col < rowINext; ++ col )
             {
-                upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
+                //upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
+		upper_.values_[ col ].mmv( v[ upper_.cols_[ col ] ], rhs );
             }
 
             // apply inverse and store result
-            inv_[ i ].mv( rhs, vBlock);
+            //inv_[ i ].mv( rhs, vBlock);
+	    inv_[ i ].v( rhs, vBlock);
         }
 
-        copyOwnerToAll( mv );
+        //copyOwnerToAll( mv );
+	copyOwnerToAll( v );
 
         if( relaxation_ ) {
-            mv *= w_;
+            //mv *= w_;
+	    v *= w_;
         }
-        reorderBack(mv, v);
+        //reorderBack(mv, v);
     }
 
     template <class V>
