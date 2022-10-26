@@ -427,7 +427,6 @@ namespace Opm
             }
             else
             {
-		if (simulator_.gridView().comm().rank() == 0) { std::cout << "Update not recreate solver" << std::endl;}
                 flexibleSolver_->preconditioner().update();
             }
         }

@@ -50,7 +50,6 @@ public:
         const auto& fineLevelMatrix = fineOperator.getmat();
 	setIS(fineOperator);
 	interiorSize_ = fineLevelMatrix.N();
-	if (communication_->communicator().rank() == 0) {std::cout<< interiorSize_<<" "<< fineLevelMatrix.N() << std::endl;}
         coarseLevelMatrix_.reset(new CoarseMatrix(fineLevelMatrix.N(), fineLevelMatrix.M(), CoarseMatrix::row_wise));
         auto createIter = coarseLevelMatrix_->createbegin();
 

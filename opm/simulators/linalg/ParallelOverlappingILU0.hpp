@@ -964,7 +964,7 @@ public:
 
             // apply inverse and store result
             //inv_[ i ].mv( rhs, vBlock);
-	    inv_[ i ].v( rhs, vBlock);
+	    inv_[ i ].mv( rhs, vBlock);
         }
 
         //copyOwnerToAll( mv );

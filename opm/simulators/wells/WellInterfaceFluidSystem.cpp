@@ -94,7 +94,6 @@ activeProductionConstraint(const SingleWellState& ws,
         const double bhp_limit = controls.bhp_limit;
         double current_bhp = ws.bhp;
         if (bhp_limit > current_bhp) {
-	    std::cout << "prod change to bhp " << bhp_limit <<" "<< current_bhp<< std::endl;
             return Well::ProducerCMode::BHP;
 	}
     }
@@ -214,7 +213,6 @@ activeInjectionConstraint(const SingleWellState& ws,
         const auto& bhp = controls.bhp_limit;
         double current_bhp = ws.bhp;
         if (bhp < current_bhp) {
-	    std::cout << "injectchange to bhp " << bhp <<" "<< current_bhp<< std::endl; 
             return Well::InjectorCMode::BHP;
 	}
     }
@@ -304,7 +302,6 @@ checkIndividualConstraints(SingleWellState& ws,
         auto new_cmode = this->activeProductionConstraint(ws, summaryState, deferred_logger);
         if (new_cmode != ws.production_cmode) {
             ws.production_cmode = new_cmode;
-	    std::cout << "Prodction change" <<std::endl;
             return true;
         }
     }
@@ -313,7 +310,6 @@ checkIndividualConstraints(SingleWellState& ws,
         auto new_cmode = this->activeInjectionConstraint(ws, summaryState, deferred_logger);
         if (new_cmode != ws.injection_cmode) {
             ws.injection_cmode = new_cmode;
-	    std::cout << "Injection change" <<std::endl;
             return true;
         }
     }

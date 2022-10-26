@@ -263,12 +263,8 @@ namespace Opm
         bool changed = false;
         if (iog == IndividualOrGroup::Individual) {
             changed = this->checkIndividualConstraints(ws, summaryState, deferred_logger);
-	    if (changed)
-		std::cout << "Change individual " << ebos_simulator.vanguard().grid().comm().rank()<< " "<< this->name()<<std::endl;
         } else if (iog == IndividualOrGroup::Group) {
             changed = this->checkGroupConstraints(well_state, group_state, schedule, summaryState, deferred_logger);
-	    if (changed)
-		std::cout << "Change group " << ebos_simulator.vanguard().grid().comm().rank()<< " "<< this->name()<<std::endl;
         } else {
             assert(iog == IndividualOrGroup::Both);
             changed = this->checkConstraints(well_state, group_state, schedule, summaryState, deferred_logger);
