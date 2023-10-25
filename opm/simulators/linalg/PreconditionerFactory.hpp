@@ -1,4 +1,3 @@
-
 /*
   Copyright 2009, 2010 SINTEF ICT, Applied Mathematics.
   Copyright 2019 SINTEF Digital, Mathematics and Cybernetics.
