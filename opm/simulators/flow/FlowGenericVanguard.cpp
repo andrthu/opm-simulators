@@ -129,6 +129,7 @@ FlowGenericVanguard::FlowGenericVanguard(SimulationModelParams&& params)
         OpmLog::error(msg);
         throw std::runtime_error(msg);
     }
+    coarsePartitionGraphParameter_ = Parameters::Get<Parameters::CoarsePartitionGraphParameter<double>>();
 
 #if HAVE_OPENCL || HAVE_ROCSPARSE || HAVE_CUDA
     numJacobiBlocks_ = Parameters::Get<Parameters::NumJacobiBlocks>();
@@ -481,6 +482,8 @@ void FlowGenericVanguard::registerParameters_()
          "groups from historical SCHEDULE section.");
     Parameters::Register<Parameters::EdgeWeightsMethod>
         ("Choose edge-weighing strategy: 'uniform', 'transmissibility', or 'logtrans' (logarithm of transmissibility).");
+    Parameters::Register<Parameters::CoarsePartitionGraphParameter<Scalar>>
+        ("Merge large transmissibility connected vertices in the partitioning graph. Number between 0 and 1.");
 
 #if HAVE_OPENCL || HAVE_ROCSPARSE || HAVE_CUDA
     Parameters::Register<Parameters::NumJacobiBlocks>

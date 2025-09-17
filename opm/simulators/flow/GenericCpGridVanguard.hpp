@@ -27,6 +27,9 @@
 #ifndef OPM_GENERIC_CPGRID_VANGUARD_HPP
 #define OPM_GENERIC_CPGRID_VANGUARD_HPP
 
+#include <dune/istl/bcrsmatrix.hh>
+#include <dune/istl/matrixindexset.hh>
+
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgrid/LevelCartesianIndexMapper.hpp>
 
@@ -170,13 +173,18 @@ protected:
                         EclipseState&                            eclState,
                         FlowGenericVanguard::ParallelWellStruct& parallelWells,
                         const int                                numJacobiBlocks,
-                        const bool                               enableEclOutput);
+                        const bool                               enableEclOutput,
+                        const double                             coarsePartitionGraphParameter);
 
     void distributeFieldProps_(EclipseState& eclState);
 
 private:
     std::vector<double> extractFaceTrans(const GridView& gridView) const;
 
+    double constructTransGraph(const GridView& gridView,
+                               Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>& graph,
+                               const double coarsePartitionGraphParameter) const;
+    
     void distributeGrid(const Dune::EdgeWeightMethod                          edgeWeightsMethod,
                         const bool                                            ownersFirst,
                         const bool                                            addCorners,
@@ -190,7 +198,9 @@ private:
                         const std::vector<Well>&                              wells,
                         const std::unordered_map<std::string, std::set<int>>& possibleFutureConnections,
                         EclipseState&                                         eclState,
-                        FlowGenericVanguard::ParallelWellStruct&              parallelWells);
+                        FlowGenericVanguard::ParallelWellStruct&              parallelWells,
+                        Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
+                        double                                                coarseThreshold);
 
     void distributeGrid(const Dune::EdgeWeightMethod                          edgeWeightsMethod,
                         const bool                                            ownersFirst,
@@ -205,7 +215,9 @@ private:
                         const std::vector<Well>&                              wells,
                         const std::unordered_map<std::string, std::set<int>>& possibleFutureConnections,
                         ParallelEclipseState*                                 eclState,
-                        FlowGenericVanguard::ParallelWellStruct&              parallelWells);
+                        FlowGenericVanguard::ParallelWellStruct&              parallelWells,
+                        Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
+                        double                                                coarseThreshold);
 
 protected:
     virtual const std::string& zoltanParams() const = 0;

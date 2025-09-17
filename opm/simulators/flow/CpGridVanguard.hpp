@@ -245,7 +245,8 @@ public:
                              this->imbalanceTol(),
                              this->gridView(), this->schedule(),
                              this->eclState(), this->parallelWells_,
-                             this->numJacobiBlocks(), this->enableEclOutput());
+                             this->numJacobiBlocks(), this->enableEclOutput(),
+                             this->coarsePartitionGraphParameter());
 #endif
 
         this->updateGridView_();

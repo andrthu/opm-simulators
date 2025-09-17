@@ -164,7 +164,8 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                EclipseState&                            eclState1,
                FlowGenericVanguard::ParallelWellStruct& parallelWells,
                const int                                numJacobiBlocks,
-               const bool                               enableEclOutput)
+               const bool                               enableEclOutput,
+               const double                             coarsePartitionGraphParameter)
 {
     if (((partitionMethod == Dune::PartitionMethod::zoltan) ||
          (partitionMethod == Dune::PartitionMethod::zoltanGoG)) &&
@@ -211,6 +212,9 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
             }
         }
 
+        Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>> graph;
+        double coarseThreshold = this->constructTransGraph(gridView, graph, coarsePartitionGraphParameter);
+
         // Skipping inactive wells in partitioning currently does not play nice with restart..
         const bool restart = eclState1.getInitConfig().restartRequested();
         const bool split_inactive = (!restart && allowSplittingInactiveWells);
@@ -229,7 +233,7 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                                  imbalanceTol, loadBalancerSet != 0,
                                  faceTrans, wells,
                                  possibleFutureConnections,
-                                 eclState1, parallelWells);
+                                 eclState1, parallelWells, graph, coarseThreshold);
         }
 
         // Add inactive wells to all ranks with connections (not solved, so OK even without distributed wells)
@@ -354,6 +358,61 @@ extractFaceTrans(const GridView& gridView) const
 }
 
 template <class ElementMapper, class GridView, class Scalar>
+double
+GenericCpGridVanguard<ElementMapper, GridView, Scalar>::
+constructTransGraph(const GridView& gridView,
+                    Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>& graph,
+                    const double coarsePartitionGraphParameter) const
+{
+    size_t numCells = this->grid_->numCells();
+    //using Matrix = Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>;
+    //graph = Matrix(numCells, numCells,);
+
+    Dune::MatrixIndexSet op;
+    op.resize( numCells, numCells );
+    
+    const auto elemMapper = ElementMapper { gridView, Dune::mcmgElementLayout() };
+
+    for (const auto& elem : elements(gridView, Dune::Partitions::interiorBorder)) {
+
+        auto d = elemMapper.index(elem);
+        op.add(d,d);
+        for (const auto& is : intersections(gridView, elem)) {
+            if (!is.neighbor()) {
+                continue;
+            }
+
+            //const auto I = static_cast<unsigned int>(elemMapper.index(is.inside()));
+            const auto J = static_cast<unsigned int>(elemMapper.index(is.outside()));
+            op.add(d,J);
+            
+            //faceTrans[is.id()] = this->getTransmissibility(I, J);
+        }
+    }
+
+    op.exportIdx(graph);
+    std::vector<double> transForSort;
+    for (const auto& elem : elements(gridView, Dune::Partitions::interiorBorder)) {
+        for (const auto& is : intersections(gridView, elem)) {
+            if (!is.neighbor()) {
+                continue;
+            }
+
+            const auto I = static_cast<unsigned int>(elemMapper.index(is.inside()));
+            const auto J = static_cast<unsigned int>(elemMapper.index(is.outside()));
+            double t = this->getTransmissibility(I, J);
+            graph[I][J] = t;
+            transForSort.push_back(t);
+
+        }
+    }
+
+    std::sort(transForSort.begin(), transForSort.end());
+
+    return transForSort[(int) (coarsePartitionGraphParameter * transForSort.size())];
+}
+
+template <class ElementMapper, class GridView, class Scalar>
 void
 GenericCpGridVanguard<ElementMapper, GridView, Scalar>::
 distributeGrid(const Dune::EdgeWeightMethod                          edgeWeightsMethod,
@@ -369,7 +428,9 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                const std::vector<Well>&                              wells,
                const std::unordered_map<std::string, std::set<int>>& possibleFutureConnections,
                EclipseState&                                         eclState1,
-               FlowGenericVanguard::ParallelWellStruct&              parallelWells)
+               FlowGenericVanguard::ParallelWellStruct&              parallelWells,
+               Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
+               double                                                coarseThreshold)
 {
     if (auto* eclState = dynamic_cast<ParallelEclipseState*>(&eclState1);
         eclState != nullptr)
@@ -379,7 +440,7 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                              serialPartitioning, enableDistributedWells,
                              imbalanceTol, loadBalancerSet, faceTrans,
                              wells, possibleFutureConnections,
-                             eclState, parallelWells);
+                             eclState, parallelWells, graph, coarseThreshold);
     }
     else {
         const auto message = std::string {
@@ -411,7 +472,9 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                const std::vector<Well>&                              wells,
                const std::unordered_map<std::string, std::set<int>>& possibleFutureConnections,
                ParallelEclipseState*                                 eclState,
-               FlowGenericVanguard::ParallelWellStruct&              parallelWells)
+               FlowGenericVanguard::ParallelWellStruct&              parallelWells,
+               Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
+               double                                                coarseThreshold)
 {
     OPM_TIMEBLOCK(gridDistribute);
     const auto isIORank = this->grid_->comm().rank() == 0;
@@ -442,7 +505,8 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                                       faceTrans.data(), ownersFirst,
                                       addCornerCells, overlapLayers,
                                       partitionMethod, imbalanceTol,
-                                      enableDistributedWells));
+                                      enableDistributedWells, &graph,
+                                      coarseThreshold));
     }
 }
 
