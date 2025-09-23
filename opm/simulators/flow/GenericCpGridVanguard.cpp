@@ -168,7 +168,8 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                const double                             coarsePartitionGraphParameter)
 {
     if (((partitionMethod == Dune::PartitionMethod::zoltan) ||
-         (partitionMethod == Dune::PartitionMethod::zoltanGoG)) &&
+         (partitionMethod == Dune::PartitionMethod::zoltanGoG ||
+          partitionMethod == Dune::PartitionMethod::zoltanCG)) &&
         !this->zoltanParams().empty())
     {
         this->grid_->setPartitioningParams
@@ -213,7 +214,13 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
         }
 
         Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>> graph;
-        double coarseThreshold = this->constructTransGraph(gridView, graph, coarsePartitionGraphParameter);
+        double coarseThreshold = -1;
+        if (partitionMethod == Dune::PartitionMethod::zoltanCG) {
+            if (this->grid_->comm().rank() == 0) {
+                std::cout << "We are doing coarse graph partitioning: threshold is: " << coarsePartitionGraphParameter << std::endl;
+                coarseThreshold = this->constructTransGraph(gridView, graph, coarsePartitionGraphParameter);
+            }
+        }
 
         // Skipping inactive wells in partitioning currently does not play nice with restart..
         const bool restart = eclState1.getInitConfig().restartRequested();
@@ -370,7 +377,8 @@ constructTransGraph(const GridView& gridView,
 
     Dune::MatrixIndexSet op;
     op.resize( numCells, numCells );
-    
+
+    std::cout << "Start mat alloc" << std::endl;
     const auto elemMapper = ElementMapper { gridView, Dune::mcmgElementLayout() };
 
     for (const auto& elem : elements(gridView, Dune::Partitions::interiorBorder)) {
@@ -391,6 +399,7 @@ constructTransGraph(const GridView& gridView,
     }
 
     op.exportIdx(graph);
+    std::cout << "fin mat alloc" << std::endl;
     std::vector<double> transForSort;
     for (const auto& elem : elements(gridView, Dune::Partitions::interiorBorder)) {
         for (const auto& is : intersections(gridView, elem)) {
@@ -406,9 +415,11 @@ constructTransGraph(const GridView& gridView,
 
         }
     }
+    std::cout << "fin mat val" << std::endl;
 
     std::sort(transForSort.begin(), transForSort.end());
-
+    std::cout << "fin sort trans" << std::endl;
+    
     return transForSort[(int) (coarsePartitionGraphParameter * transForSort.size())];
 }
 

@@ -151,9 +151,11 @@ FlowGenericVanguard::FlowGenericVanguard(SimulationModelParams&& params)
         partitionMethod_ = Dune::PartitionMethod::metis;
     } else if (pm == "zoltanwell") {
         partitionMethod_ = Dune::PartitionMethod::zoltanGoG;
+    } else if (pm == "zoltanCG") {
+        partitionMethod_ = Dune::PartitionMethod::zoltanCG;
     } else {
         std::string msg = fmt::format("Unknown value for --partition-method parameter: '{}'. "
-                                      "Accepted values are 'simple', 'zoltan', 'metis', and 'zoltanwell'.",
+                                      "Accepted values are 'simple', 'zoltan', 'metis', 'zoltanCG' and 'zoltanwell'.",
                                       pm);
         OpmLog::error(msg);
         throw std::runtime_error(msg);
@@ -501,7 +503,7 @@ void FlowGenericVanguard::registerParameters_()
     Parameters::Register<Parameters::NumOverlap>
         ("Numbers of layers overlap in parallel partition");
     Parameters::Register<Parameters::PartitionMethod>
-        ("Choose partitioning method: 'simple', 'zoltan', 'metis', or "
+        ("Choose partitioning method: 'simple', 'zoltan', 'metis', zoltanCG or "
          "'zoltanwell' (Zoltan with all cells perforated by a well represented by a single vertex).");
     Parameters::Register<Parameters::SerialPartitioning>
         ("Perform partitioning for parallel runs on a single process.");
