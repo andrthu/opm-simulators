@@ -219,6 +219,8 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
             if (this->grid_->comm().rank() == 0) {
                 std::cout << "We are doing coarse graph partitioning: threshold is: " << coarsePartitionGraphParameter << std::endl;
                 coarseThreshold = this->constructTransGraph(gridView, graph, coarsePartitionGraphParameter);
+                std::cout << "We are doing coarse graph partitioning: threshold is: " << coarseThreshold << std::endl;
+            
             }
         }
 
