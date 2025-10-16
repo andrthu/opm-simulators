@@ -165,7 +165,8 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                FlowGenericVanguard::ParallelWellStruct& parallelWells,
                const int                                numJacobiBlocks,
                const bool                               enableEclOutput,
-               const double                             coarsePartitionGraphParameter)
+               const double                             coarsePartitionGraphParameter,
+               const int                                coarsePartitionMaxNodeSize)
 {
     if (((partitionMethod == Dune::PartitionMethod::zoltan) ||
          (partitionMethod == Dune::PartitionMethod::zoltanGoG ||
@@ -242,7 +243,8 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                                  imbalanceTol, loadBalancerSet != 0,
                                  faceTrans, wells,
                                  possibleFutureConnections,
-                                 eclState1, parallelWells, graph, coarseThreshold);
+                                 eclState1, parallelWells, graph,
+                                 coarseThreshold, coarsePartitionMaxNodeSize);
         }
 
         // Add inactive wells to all ranks with connections (not solved, so OK even without distributed wells)
@@ -443,7 +445,8 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                EclipseState&                                         eclState1,
                FlowGenericVanguard::ParallelWellStruct&              parallelWells,
                Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
-               double                                                coarseThreshold)
+               double                                                coarseThreshold,
+               const int                                             coarsePartitionMaxNodeSize)
 {
     if (auto* eclState = dynamic_cast<ParallelEclipseState*>(&eclState1);
         eclState != nullptr)
@@ -453,7 +456,8 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                              serialPartitioning, enableDistributedWells,
                              imbalanceTol, loadBalancerSet, faceTrans,
                              wells, possibleFutureConnections,
-                             eclState, parallelWells, graph, coarseThreshold);
+                             eclState, parallelWells, graph,
+                             coarseThreshold, coarsePartitionMaxNodeSize);
     }
     else {
         const auto message = std::string {
@@ -487,7 +491,8 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                ParallelEclipseState*                                 eclState,
                FlowGenericVanguard::ParallelWellStruct&              parallelWells,
                Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
-               double                                                coarseThreshold)
+               double                                                coarseThreshold,
+               const int                                             coarsePartitionMaxNodeSize)
 {
     OPM_TIMEBLOCK(gridDistribute);
     const auto isIORank = this->grid_->comm().rank() == 0;
@@ -519,7 +524,7 @@ distributeGrid(const Dune::EdgeWeightMethod                          edgeWeights
                                       addCornerCells, overlapLayers,
                                       partitionMethod, imbalanceTol,
                                       enableDistributedWells, &graph,
-                                      coarseThreshold));
+                                      coarseThreshold, coarsePartitionMaxNodeSize));
     }
 }
 

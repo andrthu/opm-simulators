@@ -54,6 +54,7 @@ struct EclOutputInterval { static constexpr int value = -1; };
 struct EdgeWeightsMethod  { static constexpr auto value = "transmissibility"; };
 template<class Scalar>
 struct CoarsePartitionGraphParameter { static constexpr Scalar value = 0.9; };
+struct CoarsePartitionMaxNodeSize { static constexpr int value = -1; };
 struct EnableDryRun { static constexpr auto value = "auto"; };
 struct EnableEclOutput { static constexpr auto value = true; };
 struct EnableOpmRstFile { static constexpr bool value = false; };
@@ -246,6 +247,9 @@ public:
 
     double coarsePartitionGraphParameter() const
     {return coarsePartitionGraphParameter_; }
+    
+    int coarsePartitionMaxNodeSize() const
+    {return coarsePartitionMaxNodeSize_;}
     /*!
      * \brief Number of blocks in the Block-Jacobi preconditioner.
      */
@@ -375,6 +379,7 @@ protected:
     std::string fileName_;
     Dune::EdgeWeightMethod edgeWeightsMethod_;
     double coarsePartitionGraphParameter_;
+    int coarsePartitionMaxNodeSize_;
 
 #if HAVE_OPENCL || HAVE_ROCSPARSE || HAVE_CUDA
     int numJacobiBlocks_{0};

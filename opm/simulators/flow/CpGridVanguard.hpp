@@ -246,7 +246,8 @@ public:
                              this->gridView(), this->schedule(),
                              this->eclState(), this->parallelWells_,
                              this->numJacobiBlocks(), this->enableEclOutput(),
-                             this->coarsePartitionGraphParameter());
+                             this->coarsePartitionGraphParameter(),
+                             this->coarsePartitionMaxNodeSize());
 #endif
 
         this->updateGridView_();

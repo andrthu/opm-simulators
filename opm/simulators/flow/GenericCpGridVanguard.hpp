@@ -174,7 +174,8 @@ protected:
                         FlowGenericVanguard::ParallelWellStruct& parallelWells,
                         const int                                numJacobiBlocks,
                         const bool                               enableEclOutput,
-                        const double                             coarsePartitionGraphParameter);
+                        const double                             coarsePartitionGraphParameter,
+                        const int                                coarsePartitionMaxNodeSize);
 
     void distributeFieldProps_(EclipseState& eclState);
 
@@ -200,7 +201,8 @@ private:
                         EclipseState&                                         eclState,
                         FlowGenericVanguard::ParallelWellStruct&              parallelWells,
                         Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
-                        double                                                coarseThreshold);
+                        double                                                coarseThreshold,
+                        const int                                             coarsePartitionMaxNodeSize);
 
     void distributeGrid(const Dune::EdgeWeightMethod                          edgeWeightsMethod,
                         const bool                                            ownersFirst,
@@ -217,7 +219,8 @@ private:
                         ParallelEclipseState*                                 eclState,
                         FlowGenericVanguard::ParallelWellStruct&              parallelWells,
                         Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>&    graph,
-                        double                                                coarseThreshold);
+                        double                                                coarseThreshold,
+                        const int                                             coarsePartitionMaxNodeSize);
 
 protected:
     virtual const std::string& zoltanParams() const = 0;

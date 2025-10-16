@@ -130,6 +130,7 @@ FlowGenericVanguard::FlowGenericVanguard(SimulationModelParams&& params)
         throw std::runtime_error(msg);
     }
     coarsePartitionGraphParameter_ = Parameters::Get<Parameters::CoarsePartitionGraphParameter<double>>();
+    coarsePartitionMaxNodeSize_ = Parameters::Get<Parameters::CoarsePartitionMaxNodeSize>();
 
 #if HAVE_OPENCL || HAVE_ROCSPARSE || HAVE_CUDA
     numJacobiBlocks_ = Parameters::Get<Parameters::NumJacobiBlocks>();
@@ -486,7 +487,8 @@ void FlowGenericVanguard::registerParameters_()
         ("Choose edge-weighing strategy: 'uniform', 'transmissibility', or 'logtrans' (logarithm of transmissibility).");
     Parameters::Register<Parameters::CoarsePartitionGraphParameter<Scalar>>
         ("Merge large transmissibility connected vertices in the partitioning graph. Number between 0 and 1.");
-
+    Parameters::Register<Parameters::CoarsePartitionMaxNodeSize>
+        ("Maximal size of a single node in coarse graph partitioning method.");
 #if HAVE_OPENCL || HAVE_ROCSPARSE || HAVE_CUDA
     Parameters::Register<Parameters::NumJacobiBlocks>
         ("Number of blocks to be created for the Block-Jacobi preconditioner.");
