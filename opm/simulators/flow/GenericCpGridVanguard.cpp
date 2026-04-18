@@ -376,15 +376,13 @@ constructTransGraph(const GridView& gridView,
                     const double coarsePartitionGraphParameter) const
 {
     size_t numCells = this->grid_->numCells();
-    //using Matrix = Dune::BCRSMatrix<Dune::FieldMatrix<double, 1, 1>>;
-    //graph = Matrix(numCells, numCells,);
 
     Dune::MatrixIndexSet op;
     op.resize( numCells, numCells );
 
-    std::cout << "Start mat alloc" << std::endl;
     const auto elemMapper = ElementMapper { gridView, Dune::mcmgElementLayout() };
 
+    // Create adjecency for transmissibility graph
     for (const auto& elem : elements(gridView, Dune::Partitions::interiorBorder)) {
 
         auto d = elemMapper.index(elem);
@@ -394,16 +392,13 @@ constructTransGraph(const GridView& gridView,
                 continue;
             }
 
-            //const auto I = static_cast<unsigned int>(elemMapper.index(is.inside()));
             const auto J = static_cast<unsigned int>(elemMapper.index(is.outside()));
             op.add(d,J);
-            
-            //faceTrans[is.id()] = this->getTransmissibility(I, J);
         }
     }
 
+    // Add transmissibilities to the graph
     op.exportIdx(graph);
-    std::cout << "fin mat alloc" << std::endl;
     std::vector<double> transForSort;
     for (const auto& elem : elements(gridView, Dune::Partitions::interiorBorder)) {
         for (const auto& is : intersections(gridView, elem)) {
@@ -416,14 +411,12 @@ constructTransGraph(const GridView& gridView,
             double t = this->getTransmissibility(I, J);
             graph[I][J] = t;
             transForSort.push_back(t);
-
         }
     }
-    std::cout << "fin mat val" << std::endl;
 
+    // Sort the transmissibilities so we can find the treshold value with coarsePartitionGraphParameter
     std::sort(transForSort.begin(), transForSort.end());
-    std::cout << "fin sort trans" << std::endl;
-    
+
     return transForSort[(int) (coarsePartitionGraphParameter * transForSort.size())];
 }
 
