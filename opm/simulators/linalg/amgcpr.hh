@@ -256,6 +256,11 @@ namespace Dune
        */
       bool usesDirectCoarseLevelSolver() const;
 
+      std::shared_ptr<OperatorHierarchy> operatorHirarchyList() const
+      {
+          return matrices_;
+      }
+
     private:
       /**
        * @brief Create matrix and smoother hierarchies.
